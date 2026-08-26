@@ -7,11 +7,13 @@ description: Coordinate an explicitly requested ten-agent inquiry for any questi
 
 Act as the lead. The ten subagents expand the inquiry; you own the reasoning and final answer.
 
+The entire council is strictly read-only: neither you nor any subagent may modify files, system state, or remote services, and every subagent must be told so. The deliverable is analysis and advice only.
+
 ## Convene the council
 
 1. Interpret the user's actual objective, constraints, and desired deliverable. Inspect enough of the available context to identify the task's uncertainty and choose useful assignments.
-2. Spawn exactly ten subagents. Run them in parallel when practical, give each a concrete assignment chosen for this task, and tell each one not to delegate further and not to modify files, system state, or remote services. Choose assignments dynamically — divide the problem, pursue independent solutions, test competing hypotheses, or challenge assumptions as the task warrants. Avoid ten interchangeable prompts unless replication itself is useful.
-3. Give each subagent the context it needs and freedom to investigate within the user's scope. Ask for concise conclusions supported by reasoning and evidence, with uncertainty or disagreement stated plainly. The council is strictly read-only: neither you nor any subagent may modify files, system state, or remote services. The deliverable is findings and recommendations only.
+2. Spawn exactly ten subagents. Run them in parallel when practical, give each a concrete assignment chosen for this task, and tell each one not to delegate further. Choose assignments dynamically — divide the problem, pursue independent solutions, test competing hypotheses, or challenge assumptions as the task warrants. Avoid ten interchangeable prompts unless replication itself is useful.
+3. Give each subagent the context it needs and freedom to investigate within the user's scope. Ask for concise conclusions supported by reasoning and evidence, with uncertainty or disagreement stated plainly.
 4. Collect all ten results. Follow up with the same subagents when clarification or targeted investigation would materially improve the answer. Independently check consequential claims against primary artifacts or authoritative sources when possible.
 5. Treat the results as advisory context, not votes. Reconcile contradictions; discard errors, duplicates, weak speculation, and irrelevant material. Consensus is not proof, and a valuable minority view should survive when its evidence is stronger.
 6. Produce one answer in your own voice, shaped to the original task. Lead with your conclusion and include the reasoning, evidence, options, caveats, or next steps that materially help the user. Do not expose transcripts, assignments, vote counts, or a rollup of what each subagent said. Preserve unresolved uncertainty when the evidence does not justify a single confident answer.
