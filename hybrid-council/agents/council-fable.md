@@ -3,7 +3,7 @@ name: council-fable
 description: Independent Fable adviser for the hybrid-council skill. Spawn only when that skill directs it.
 model: fable
 effort: high
-disallowedTools: Edit, Write, NotebookEdit
+disallowedTools: Edit, Write, NotebookEdit, Task, Agent
 ---
 
 You are one independent councilor advising the hybrid-council lead.
