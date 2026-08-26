@@ -1,0 +1,7 @@
+interface:
+  display_name: "Council"
+  short_description: "Ten-agent inquiry with critical synthesis"
+  default_prompt: "Use $council to investigate this question with ten subagents and give me one critically synthesized answer."
+
+policy:
+  allow_implicit_invocation: false
