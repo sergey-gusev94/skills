@@ -11,21 +11,27 @@ Three related skills for convening multi-agent councils:
 Everything is discovered through symlinks; the repo is the single source of truth.
 
 ```sh
+mkdir -p ~/.codex/skills ~/.claude/skills ~/.claude/agents
+
 # Codex skills
-ln -s ~/repo/skills/council ~/.codex/skills/council
-ln -s ~/repo/skills/review-council ~/.codex/skills/review-council
+ln -sfn ~/repo/skills/council ~/.codex/skills/council
+ln -sfn ~/repo/skills/review-council ~/.codex/skills/review-council
 
 # Claude Code skill
-ln -s ~/repo/skills/hybrid-council ~/.claude/skills/hybrid-council
+ln -sfn ~/repo/skills/hybrid-council ~/.claude/skills/hybrid-council
 
 # Claude Code adviser agents — required separately: Claude does not discover
 # agents nested inside a skill directory
-ln -s ~/repo/skills/hybrid-council/agents/council-fable.md ~/.claude/agents/council-fable.md
-ln -s ~/repo/skills/hybrid-council/agents/council-opus.md ~/.claude/agents/council-opus.md
+ln -sfn ~/repo/skills/hybrid-council/agents/council-fable.md ~/.claude/agents/council-fable.md
+ln -sfn ~/repo/skills/hybrid-council/agents/council-opus.md ~/.claude/agents/council-opus.md
 ```
+
+`ln -sfn` makes the block safe to rerun: plain `ln -s` fails on an existing link and silently nests a new link inside an existing directory.
 
 ## Requirements
 
-- Codex CLI on `PATH` (tested with 0.149.1).
-- The Codex model defaults to `gpt-5.6-sol`; override per run with `CODEX_COUNCIL_MODEL`.
-- `run-codex-council.sh` reports `STATUS=ok|degraded|failed`; `degraded` means fewer than ten Codex subagents completed (detected via a `COUNCIL_SUBAGENTS=<n>` sentinel line the script requires in the answer).
+- Codex CLI on `PATH` (tested with 0.150.0). The council needs Codex multi-agent v2, on by default since 0.150.0; on 0.149.x add `--enable multi_agent_v2` to the script's `codex exec` call, or the council silently collapses to a single-model answer.
+- Ten parallel subagents need `[agents] max_concurrent_threads_per_session` of at least 10 in `~/.codex/config.toml`.
+- The Codex model defaults to `gpt-5.6-sol` in `run-codex-council.sh`; override per run with `CODEX_COUNCIL_MODEL`. Direct `$council` and `$review-council` invocations use the active Codex model.
+- Read-only is enforced by instruction, not by sandboxing: the script runs Codex with full access (so subagents have network and web search), the Claude advisers keep Bash, and every voice is told not to change anything.
+- `run-codex-council.sh` reports `STATUS=ok|degraded|unverified|failed`: `degraded` means fewer than ten Codex subagents completed, and `unverified` means the answer is usable but the count could not be confirmed. Both derive from a self-reported `COUNCIL_SUBAGENTS=<n>` sentinel line the script asks for in the answer.
