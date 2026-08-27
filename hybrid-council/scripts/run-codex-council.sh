@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Launch the Codex ten-agent council non-interactively for the hybrid-council skill.
+# Launch the Codex ten-agent council non-interactively for the hybrid skills.
 # Usage:
-#   run-codex-council.sh <packet-file> [workdir]                  new council run
+#   run-codex-council.sh [--skill council|review-council] <packet-file> [workdir]
+#                                                                 new council run
 #   run-codex-council.sh resume <session-id> <follow-up-file> [workdir]
 #                                                    follow-up in an existing session
+# --skill picks the Codex skill to invoke: council (default) for general
+# inquiry, review-council for the ten-agent code review. Both report the same
+# COUNCIL_SUBAGENTS sentinel, so the status contract is identical.
 # Prints STATUS/SUBAGENTS/RESULT_FILE/LOG_FILE/SESSION_ID lines; read RESULT_FILE
 # for the answer.
 # STATUS: ok (all ten subagents self-reported complete)
@@ -36,6 +40,15 @@ fail() {
 
 command -v codex >/dev/null 2>&1 || fail "codex CLI not found on PATH"
 
+COUNCIL_SKILL=council
+if [[ ${1:-} == --skill ]]; then
+  case ${2:-} in
+    council|review-council) COUNCIL_SKILL=$2 ;;
+    *) fail "--skill must be council or review-council, got: ${2:-<missing>}" ;;
+  esac
+  shift 2
+fi
+
 MODE=run
 if [[ ${1:-} == resume ]]; then
   MODE=resume
@@ -50,7 +63,8 @@ if [[ ${1:-} == resume ]]; then
 else
   PACKET_FILE=${1:-}
   WORKDIR=${2:-$PWD}
-  [[ -n $PACKET_FILE ]] || fail "usage: run-codex-council.sh <packet-file> [workdir]"
+  [[ -n $PACKET_FILE ]] \
+    || fail "usage: run-codex-council.sh [--skill council|review-council] <packet-file> [workdir]"
   [[ -s $PACKET_FILE ]] || fail "packet file missing or empty: $PACKET_FILE"
   [[ -d $WORKDIR ]] || fail "workdir is not a directory: $WORKDIR"
 fi
@@ -80,8 +94,8 @@ else
   # itself needs no preamble.
   PROMPT_FILE=$RUN_DIR/prompt.md
   {
+    printf 'Use the $%s skill to answer the request in the task packet below.\n' "$COUNCIL_SKILL"
     cat <<'EOF'
-Use the $council skill to answer the request in the task packet below.
 This council is advisory and read-only: do not modify files, system state, or remote services.
 Your answer is advisory input for a lead model's synthesis, not a user-facing message.
 End your answer with a final line containing exactly COUNCIL_SUBAGENTS=<n> in plain text — no backticks, quotes, or other formatting — where <n> is the number of council subagents that ran to completion (0 if none could run).
