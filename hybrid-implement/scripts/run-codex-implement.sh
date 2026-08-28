@@ -9,14 +9,16 @@
 # and PATCH_FILE for the tracked diff against START_HEAD (untracked files appear
 # in the status and content snapshots inside the run directory).
 # STATUS: ok (codex succeeded, the tree changed in this round, and it
-#           self-reported complete)
+#           self-reported complete with a parseable, non-failed IMPLEMENT_TESTS
+#           value)
 #         | no-change (codex succeeded but nothing changed in this round — judge
 #           the report; an already-satisfied spec and a stalled model look
 #           identical here)
 #         | degraded (codex self-reported partial, blocked, or failed tests, or
 #           violated the git policy — POLICY_VIOLATION names the drift)
-#         | unverified (the tree changed but the self-report sentinel is
-#           missing, malformed, or contradicts the tree)
+#         | unverified (the tree changed and either IMPLEMENT_STATUS is missing,
+#           malformed, or contradicts the tree, or IMPLEMENT_TESTS is missing
+#           or malformed)
 #         | failed (no usable result).
 # REPORTED_IMPLEMENTATION and REPORTED_TESTS are the model's self-report;
 # CHANGED_FILES counts files changed against the baseline commit, tracked plus
@@ -218,6 +220,8 @@ elif [[ $REPORTED_TESTS == failed ]]; then
   STATUS=degraded
 elif [[ $TREE_CHANGED -eq 0 ]]; then
   STATUS=no-change
+elif [[ $REPORTED_TESTS == unknown ]]; then
+  STATUS=unverified
 elif [[ $REPORTED_IMPLEMENTATION == complete ]]; then
   STATUS=ok
 else
