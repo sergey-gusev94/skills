@@ -1,5 +1,5 @@
 ---
-name: hybrid-council
+name: q
 description: Convene an explicitly requested three-adviser council — a Fable adviser, an Opus adviser, and the Codex ten-agent council — then produce one critically synthesized answer.
 disable-model-invocation: true
 effort: high

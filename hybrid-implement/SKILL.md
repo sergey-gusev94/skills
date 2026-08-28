@@ -1,5 +1,5 @@
 ---
-name: hybrid-implement
+name: imp
 description: Orchestrate an explicitly requested implementation — a single Codex session writes the code, hybrid reviews vet it, and the lead adjudicates fixes in a bounded loop.
 disable-model-invocation: true
 effort: high

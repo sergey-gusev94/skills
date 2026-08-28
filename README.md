@@ -4,9 +4,9 @@ Five related skills for convening multi-agent councils:
 
 - **`council/`** — Codex skill (`$council`): a ten-subagent inquiry for any question, decision, plan, or investigation, critically synthesized by the lead.
 - **`review-council/`** — Codex skill (`$review-council`): the ten-subagent code-review variant.
-- **`hybrid-council/`** — Claude Code skill (`/hybrid-council`): convenes three advisers — Fable, Opus, and the Codex `$council` via `scripts/run-codex-council.sh` — then synthesizes one answer.
+- **`hybrid-council/`** — Claude Code skill (`/q`): convenes three advisers — Fable, Opus, and the Codex `$council` via `scripts/run-codex-council.sh` — then synthesizes one answer.
 - **`hybrid-review/`** — Claude Code skill (`/hybrid-review`): the code-review variant of `hybrid-council` — the same three advisers, with Codex running `$review-council` via the shared runner (`run-codex-council.sh --skill review-council`), synthesized into one severity-ordered review.
-- **`hybrid-implement/`** — Claude Code skill (`/hybrid-implement`): a write-enabled implement → review → fix loop. A single Codex session implements via `scripts/run-codex-implement.sh`, the `hybrid-review` procedure vets the initial change and high-risk fix rounds (the lead verifies routine fix deltas itself), and the Claude lead adjudicates findings, gates the final state by running checks on the final tree, and terminates the loop (at most five review rounds).
+- **`hybrid-implement/`** — Claude Code skill (`/imp`): a write-enabled implement → review → fix loop. A single Codex session implements via `scripts/run-codex-implement.sh`, the `hybrid-review` procedure vets the initial change and high-risk fix rounds (the lead verifies routine fix deltas itself), and the Claude lead adjudicates findings, gates the final state by running checks on the final tree, and terminates the loop (at most five review rounds).
 
 `hybrid-review` and `hybrid-implement` reuse `hybrid-council`'s runner through in-repo relative symlinks (`scripts/run-codex-council.sh`), so the runner has a single source file.
 
@@ -22,10 +22,12 @@ mkdir -p ~/.codex/skills ~/.claude/skills ~/.claude/agents
 ln -sfn ~/repo/skills/council ~/.codex/skills/council
 ln -sfn ~/repo/skills/review-council ~/.codex/skills/review-council
 
-# Claude Code skills
-ln -sfn ~/repo/skills/hybrid-council ~/.claude/skills/hybrid-council
+# Claude Code skills — hybrid-council and hybrid-implement install under the
+# short names `q` and `imp` (matching their SKILL.md `name` fields), so they
+# are invoked as /q and /imp
+ln -sfn ~/repo/skills/hybrid-council ~/.claude/skills/q
 ln -sfn ~/repo/skills/hybrid-review ~/.claude/skills/hybrid-review
-ln -sfn ~/repo/skills/hybrid-implement ~/.claude/skills/hybrid-implement
+ln -sfn ~/repo/skills/hybrid-implement ~/.claude/skills/imp
 
 # Claude Code adviser agents — required separately: Claude does not discover
 # agents nested inside a skill directory
