@@ -6,19 +6,27 @@
 #   run-codex-implement.sh resume <session-id> <fix-packet> [workdir]
 #                                                  fix round in the same session
 # Prints STATUS plus repository-fact lines; Read RESULT_FILE for Codex's report
-# and PATCH_FILE for the tracked diff against START_HEAD (untracked files show
-# only in the AFTER status snapshot inside the run directory).
-# STATUS: ok (codex succeeded, the tree changed, and it self-reported complete)
-#         | no-change (codex succeeded but nothing changed — judge the report;
-#           an already-satisfied spec and a stalled model look identical here)
-#         | degraded (codex self-reported partial or blocked, or violated the
-#           git policy — POLICY_VIOLATION names the drift)
+# and PATCH_FILE for the tracked diff against START_HEAD (untracked files appear
+# in the status and content snapshots inside the run directory).
+# STATUS: ok (codex succeeded, the tree changed in this round, and it
+#           self-reported complete)
+#         | no-change (codex succeeded but nothing changed in this round — judge
+#           the report; an already-satisfied spec and a stalled model look
+#           identical here)
+#         | degraded (codex self-reported partial, blocked, or failed tests, or
+#           violated the git policy — POLICY_VIOLATION names the drift)
 #         | unverified (the tree changed but the self-report sentinel is
 #           missing, malformed, or contradicts the tree)
 #         | failed (no usable result).
 # REPORTED_IMPLEMENTATION and REPORTED_TESTS are the model's self-report;
-# CHANGED_FILES, POLICY_VIOLATION, and the HEAD/branch lines are verified
-# against git, so trust them over the report when they disagree.
+# CHANGED_FILES counts files changed against the baseline commit, tracked plus
+# untracked, including pre-existing dirt under HYBRID_IMPLEMENT_ALLOW_DIRTY=1;
+# it is cumulative and can remain nonzero when STATUS is no-change for a round.
+# POLICY_VIOLATION and the HEAD/branch lines are also verified against git, so
+# trust these facts over the report when they disagree. Untracked additions,
+# edits, and deletions, including inside collapsed untracked directories, count
+# as changes in the round. POLICY_VIOLATION=unknown means the run failed before
+# drift could be checked; see ERROR.
 # Codex runs write-enabled with full access (danger-full-access) so it can
 # fetch dependencies and run checks; the guardrails are the git preconditions
 # below, the prompt contract, and the post-run drift checks — not a sandbox.
@@ -34,6 +42,15 @@ set -u
 
 fail() {
   echo "STATUS=failed"
+  echo "POLICY_VIOLATION=${POLICY_VIOLATION:-unknown}"
+  echo "CHANGED_FILES=${CHANGED_FILES:-unknown}"
+  echo "BRANCH=${END_BRANCH:-unknown}"
+  echo "END_HEAD=${END_HEAD:-unknown}"
+  if [[ -e ${PATCH_FILE:-} ]]; then
+    echo "PATCH_FILE=$PATCH_FILE"
+  else
+    echo "PATCH_FILE=none"
+  fi
   echo "ERROR=$1"
   echo "RESULT_FILE=${RESULT_FILE:-none}"
   echo "LOG_FILE=${LOG_FILE:-none}"
@@ -90,7 +107,16 @@ LOG_FILE=$RUN_DIR/codex.log
 BEFORE_STATUS=$RUN_DIR/before-status.txt
 AFTER_STATUS=$RUN_DIR/after-status.txt
 PATCH_FILE=$RUN_DIR/changes.patch
+BEFORE_PATCH=$RUN_DIR/before.patch
+BEFORE_UNTRACKED=$RUN_DIR/before-untracked.txt
+AFTER_UNTRACKED=$RUN_DIR/after-untracked.txt
 git -C "$REPO_ROOT" status --porcelain >"$BEFORE_STATUS"
+git -C "$REPO_ROOT" diff "$START_HEAD" >"$BEFORE_PATCH" 2>/dev/null
+{
+  git -C "$REPO_ROOT" ls-files --others --exclude-standard
+  git -C "$REPO_ROOT" ls-files --others --exclude-standard -z \
+    | xargs -0 -r git -C "$REPO_ROOT" hash-object --
+} >"$BEFORE_UNTRACKED"
 
 # The contract preamble is prepended in both modes: a resume restates the rules
 # in case the session drifted, and fix packets stay self-contained. The two
@@ -99,7 +125,7 @@ PROMPT_FILE=$RUN_DIR/prompt.md
 {
   cat <<'EOF'
 You are the implementer in a lead model's implement-review loop; your report is status input for the lead, not a user-facing message.
-Implement exactly what the task packet below asks — no unrelated cleanup, nothing beyond its scope.
+Implement the task packet below with the smallest coherent change — no unrelated cleanup, nothing beyond its scope — treating its constraints and non-goals as binding. If repository evidence shows the packet is ambiguous, internally inconsistent, infeasible, or materially unsafe, stop at a safe point, explain the problem and the simplest viable alternative in your report, and report partial or blocked rather than guessing or silently redesigning.
 Work only inside this repository's working tree. Run the project's relevant checks and report what you ran and the results.
 Leave every change uncommitted and unstaged. Never commit, merge, rebase, reset, restore, stash, clean, tag, switch branches, or push; never touch git config, hooks, remotes, or history; never modify files outside the working tree.
 End your report with two final lines in plain text — no backticks, quotes, or other formatting:
@@ -138,6 +164,11 @@ END_BRANCH=$(git -C "$REPO_ROOT" branch --show-current)
 END_HEAD=$(git -C "$REPO_ROOT" rev-parse HEAD)
 git -C "$REPO_ROOT" status --porcelain >"$AFTER_STATUS"
 git -C "$REPO_ROOT" diff "$START_HEAD" >"$PATCH_FILE" 2>/dev/null
+{
+  git -C "$REPO_ROOT" ls-files --others --exclude-standard
+  git -C "$REPO_ROOT" ls-files --others --exclude-standard -z \
+    | xargs -0 -r git -C "$REPO_ROOT" hash-object --
+} >"$AFTER_UNTRACKED"
 
 POLICY_VIOLATION=none
 violation() {
@@ -150,9 +181,20 @@ if grep -q '^[^ ?]' "$AFTER_STATUS" && ! grep -q '^[^ ?]' "$BEFORE_STATUS"; then
   violation staged-changes
 fi
 
-# Working-tree entries that were not there before the run; exact on a clean
-# start, approximate under HYBRID_IMPLEMENT_ALLOW_DIRTY=1.
-CHANGED_FILES=$(comm -13 <(sort "$BEFORE_STATUS") <(sort "$AFTER_STATUS") | wc -l | tr -d ' ')
+# Count the cumulative change against the baseline, including untracked files.
+CHANGED_FILES=$(
+  {
+    git -C "$REPO_ROOT" diff --name-only "$START_HEAD"
+    git -C "$REPO_ROOT" ls-files --others --exclude-standard
+  } | sort -u | wc -l | tr -d ' '
+)
+
+TREE_CHANGED=1
+if cmp -s "$BEFORE_PATCH" "$PATCH_FILE" \
+   && cmp -s "$BEFORE_STATUS" "$AFTER_STATUS" \
+   && cmp -s "$BEFORE_UNTRACKED" "$AFTER_UNTRACKED"; then
+  TREE_CHANGED=0
+fi
 
 [[ $EXIT_CODE -eq 0 ]] || fail "codex exec failed (exit $EXIT_CODE)"
 [[ -s $RESULT_FILE ]] || fail "codex exec produced no report; see LOG_FILE"
@@ -172,7 +214,9 @@ if [[ $POLICY_VIOLATION != none ]]; then
   STATUS=degraded
 elif [[ $REPORTED_IMPLEMENTATION == partial || $REPORTED_IMPLEMENTATION == blocked ]]; then
   STATUS=degraded
-elif [[ $CHANGED_FILES -eq 0 ]]; then
+elif [[ $REPORTED_TESTS == failed ]]; then
+  STATUS=degraded
+elif [[ $TREE_CHANGED -eq 0 ]]; then
   STATUS=no-change
 elif [[ $REPORTED_IMPLEMENTATION == complete ]]; then
   STATUS=ok

@@ -10,12 +10,11 @@
 # COUNCIL_SUBAGENTS sentinel, so the status contract is identical.
 # Prints STATUS/SUBAGENTS/RESULT_FILE/LOG_FILE/SESSION_ID lines; read RESULT_FILE
 # for the answer.
-# STATUS: ok (all ten subagents self-reported complete)
-#         | degraded (fewer than ten self-reported; SUBAGENTS has the count,
-#         0 meaning no council ran and the answer is a single model's)
-#         | unverified (usable answer, but the self-reported count is missing or
-#         implausible; every resume reports this, since a follow-up does not
-#         re-verify council completeness) | failed (no usable answer).
+# STATUS: ok (usable answer) | failed (no usable answer).
+# SUBAGENTS: 10 (full council) | 0-9 (partial council; 0 means no council ran
+# and the answer is a single model's) | unknown (the self-reported count is
+# missing or implausible). Every resume reports unknown because completeness is
+# not re-checked. Even 10 is model-self-reported, not independently verified.
 # The council is read-only by instruction, not by sandbox: Codex runs with full
 # access so subagents can reach the network, and the prompt forbids changes.
 # Run artifacts are kept under ${TMPDIR:-/tmp} so the caller can read them after
@@ -27,6 +26,7 @@ SUBAGENTS=unknown
 
 fail() {
   echo "STATUS=failed"
+  echo "SUBAGENTS=${SUBAGENTS:-unknown}"
   echo "ERROR=$1"
   echo "RESULT_FILE=${RESULT_FILE:-none}"
   echo "LOG_FILE=${LOG_FILE:-none}"
@@ -72,6 +72,34 @@ fi
 RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/hybrid-council.XXXXXX") || fail "mktemp failed"
 RESULT_FILE=$RUN_DIR/result.md
 LOG_FILE=$RUN_DIR/codex.log
+PROMPT_FILE=$RUN_DIR/prompt.md
+
+# The advisory preamble is prepended in both modes: a resume restates the
+# read-only contract in case the session drifted. Build before any cd so
+# relative packet and follow-up paths remain valid.
+if [[ $MODE == resume ]]; then
+  {
+    cat <<'EOF'
+This council is advisory and read-only: do not modify files, system state, or remote services.
+Your answer is advisory input for a lead model's synthesis, not a user-facing message.
+
+EOF
+    cat -- "$FOLLOW_UP_FILE"
+  } >"$PROMPT_FILE" || fail "failed to build prompt file"
+else
+  # The sentinel line is the machine contract for SUBAGENTS below; the packet
+  # file itself needs no preamble.
+  {
+    printf 'Use the $%s skill to answer the request in the task packet below.\n' "$COUNCIL_SKILL"
+    cat <<'EOF'
+This council is advisory and read-only: do not modify files, system state, or remote services.
+Your answer is advisory input for a lead model's synthesis, not a user-facing message.
+End your answer with a final line containing exactly COUNCIL_SUBAGENTS=<n> in plain text — no backticks, quotes, or other formatting — where <n> is the number of council subagents that ran to completion (0 if none could run).
+
+EOF
+    cat -- "$PACKET_FILE"
+  } >"$PROMPT_FILE" || fail "failed to build prompt file"
+fi
 
 # Shared flags for both the initial run and resume.
 CODEX_FLAGS=(
@@ -87,23 +115,9 @@ if [[ $MODE == resume ]]; then
   # `codex exec resume` has no -C flag, so run from the workdir instead.
   cd "$WORKDIR" || fail "cannot cd to workdir: $WORKDIR"
   codex exec resume "${CODEX_FLAGS[@]}" \
-    "$SESSION_ID" - <"$FOLLOW_UP_FILE" >"$LOG_FILE" 2>&1
+    "$SESSION_ID" - <"$PROMPT_FILE" >"$LOG_FILE" 2>&1
   EXIT_CODE=$?
 else
-  # The sentinel line is the machine contract for STATUS below; the packet file
-  # itself needs no preamble.
-  PROMPT_FILE=$RUN_DIR/prompt.md
-  {
-    printf 'Use the $%s skill to answer the request in the task packet below.\n' "$COUNCIL_SKILL"
-    cat <<'EOF'
-This council is advisory and read-only: do not modify files, system state, or remote services.
-Your answer is advisory input for a lead model's synthesis, not a user-facing message.
-End your answer with a final line containing exactly COUNCIL_SUBAGENTS=<n> in plain text — no backticks, quotes, or other formatting — where <n> is the number of council subagents that ran to completion (0 if none could run).
-
-EOF
-    cat "$PACKET_FILE"
-  } >"$PROMPT_FILE" || fail "failed to build prompt file"
-
   codex exec "${CODEX_FLAGS[@]}" \
     -C "$WORKDIR" \
     - <"$PROMPT_FILE" >"$LOG_FILE" 2>&1
@@ -113,22 +127,19 @@ fi
 
 [[ $EXIT_CODE -eq 0 ]] || fail "codex exec failed (exit $EXIT_CODE)"
 [[ -s $RESULT_FILE ]] || fail "codex exec produced no answer; see LOG_FILE"
+STATUS=ok
 
-if [[ $MODE == resume ]]; then
-  # A resume only answers a follow-up; council completeness is not re-verified.
-  STATUS=unverified
-else
+if [[ $MODE != resume ]]; then
   # Tolerant sentinel parse: scan the last lines with formatting stripped, since
   # models sometimes wrap the sentinel in backticks, bold, or stray whitespace.
   AGENTS=$(tail -n 5 "$RESULT_FILE" | tr -d '`*' \
     | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
     | grep -oE '^COUNCIL_SUBAGENTS=[0-9]+$' | tail -n 1 | cut -d= -f2)
   # String classification only — no arithmetic, so odd values like 08 or huge
-  # numbers land on unverified instead of tripping bash octal/overflow rules.
+  # numbers land on unknown instead of tripping bash octal/overflow rules.
   case ${AGENTS:-} in
-    10) STATUS=ok; SUBAGENTS=$AGENTS ;;
-    [0-9]) STATUS=degraded; SUBAGENTS=$AGENTS ;;
-    *) STATUS=unverified ;;
+    10|[0-9]) SUBAGENTS=$AGENTS ;;
+    *) SUBAGENTS=unknown ;;
   esac
 fi
 
