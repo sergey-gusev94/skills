@@ -1,4 +1,6 @@
-# Council skills
+# Agent skills and shared instructions
+
+## Skills
 
 Eight related multi-agent skills:
 
@@ -13,12 +15,27 @@ Eight related multi-agent skills:
 
 `hybrid-review`, `hybrid-implement`, and `hybrid-literature` reuse `hybrid-council`'s runner through in-repo relative symlinks (`scripts/run-codex-council.sh`), so the runner has a single source file.
 
+## Shared global instructions
+
+[`global/AGENTS.md`](global/AGENTS.md) is the source of truth for instructions shared by Codex and Claude Code. The installation block links it to Codex's global instruction location, `~/.codex/AGENTS.md`.
+
+To load the same instructions in Claude Code without maintaining a second copy, ensure `~/.claude/CLAUDE.md` contains this import:
+
+```text
+@~/.codex/AGENTS.md
+```
+
+The Claude file can also contain Claude-specific global instructions above or below the import. Start a new Codex or Claude Code session after changing the shared instructions.
+
 ## Install
 
-Everything is discovered through symlinks; the repo is the single source of truth.
+The skills and Codex global instructions are discovered through symlinks; the repo is the single source of truth. Before the first installation, merge or back up an existing `~/.codex/AGENTS.md`: the global-instructions command below replaces that path with a symlink.
 
 ```sh
 mkdir -p ~/.codex/skills ~/.claude/skills ~/.claude/agents
+
+# Shared global instructions
+ln -sfn ~/repo/skills/global/AGENTS.md ~/.codex/AGENTS.md
 
 # Codex skills (~/.codex/skills is the tested location; newer Codex versions
 # also discover user skills under ~/.agents/skills)
@@ -41,7 +58,7 @@ ln -sfn ~/repo/skills/hybrid-council/agents/council-fable.md ~/.claude/agents/co
 ln -sfn ~/repo/skills/hybrid-council/agents/council-opus.md ~/.claude/agents/council-opus.md
 ```
 
-`ln -sfn` makes the block safe to rerun: plain `ln -s` fails on an existing link and silently nests a new link inside an existing directory.
+After the first installation, `ln -sfn` makes the block safe to rerun: plain `ln -s` fails on an existing link and silently nests a new link inside an existing directory. Verify the global-instructions link with `readlink -f ~/.codex/AGENTS.md`; it should resolve to this repository's `global/AGENTS.md`.
 
 ## Requirements
 
