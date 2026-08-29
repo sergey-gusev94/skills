@@ -1,5 +1,7 @@
 # Global instructions
 
+In all work, prefer the simplest robust solution that fully addresses the problem, and add complexity only when something concrete requires it. Simplify the solution, not the diligence: keep the investigation, caveats, and safeguards the task needs.
+
 ## Clear writing
 
 Apply these rules to all prose you author, regardless of format.
