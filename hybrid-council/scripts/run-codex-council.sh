@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # Launch the Codex ten-agent council non-interactively for the hybrid skills.
 # Usage:
-#   run-codex-council.sh [--skill council|review-council|literature-council] <packet-file> [workdir]
+#   run-codex-council.sh [--skill council|review-council] <packet-file> [workdir]
 #                                                                 new council run
 #   run-codex-council.sh resume <session-id> <follow-up-file> [workdir]
 #                                                    follow-up in an existing session
 # --skill picks the Codex skill to invoke: council (default) for general
-# inquiry, review-council for the ten-agent code review, or literature-council
-# for scholarly discovery. All report the same COUNCIL_SUBAGENTS sentinel, so
-# the status contract is identical.
+# inquiry or review-council for the ten-agent code review. Both report the same
+# COUNCIL_SUBAGENTS sentinel, so the status contract is identical.
 # Prints STATUS/SUBAGENTS/RESULT_FILE/LOG_FILE/SESSION_ID lines; read RESULT_FILE
 # for the answer.
 # STATUS: ok (usable answer) | failed (no usable answer).
@@ -44,8 +43,8 @@ command -v codex >/dev/null 2>&1 || fail "codex CLI not found on PATH"
 COUNCIL_SKILL=council
 if [[ ${1:-} == --skill ]]; then
   case ${2:-} in
-    council|review-council|literature-council) COUNCIL_SKILL=$2 ;;
-    *) fail "--skill must be council, review-council, or literature-council, got: ${2:-<missing>}" ;;
+    council|review-council) COUNCIL_SKILL=$2 ;;
+    *) fail "--skill must be council or review-council, got: ${2:-<missing>}" ;;
   esac
   shift 2
 fi
@@ -65,7 +64,7 @@ else
   PACKET_FILE=${1:-}
   WORKDIR=${2:-$PWD}
   [[ -n $PACKET_FILE ]] \
-    || fail "usage: run-codex-council.sh [--skill council|review-council|literature-council] <packet-file> [workdir]"
+    || fail "usage: run-codex-council.sh [--skill council|review-council] <packet-file> [workdir]"
   [[ -s $PACKET_FILE ]] || fail "packet file missing or empty: $PACKET_FILE"
   [[ -d $WORKDIR ]] || fail "workdir is not a directory: $WORKDIR"
 fi
@@ -103,13 +102,8 @@ EOF
 fi
 
 # Shared flags for both the initial run and resume.
-if [[ $COUNCIL_SKILL == literature-council ]]; then
-  COUNCIL_MODEL=gpt-5.6-luna
-  COUNCIL_EFFORT=max
-else
-  COUNCIL_MODEL=${CODEX_COUNCIL_MODEL:-gpt-5.6-sol}
-  COUNCIL_EFFORT=high
-fi
+COUNCIL_MODEL=${CODEX_COUNCIL_MODEL:-gpt-5.6-sol}
+COUNCIL_EFFORT=high
 
 CODEX_FLAGS=(
   -c sandbox_mode=danger-full-access
