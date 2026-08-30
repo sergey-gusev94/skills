@@ -17,7 +17,7 @@ Read the project documentation and `literature/scope.md`. Choose at most ten non
 
 Each researcher is read-only, must not delegate, and may use keyless OpenAlex (including `open_access.oa_url`), Crossref, arXiv, and Europe PMC APIs plus web search. It verifies that each `oa_url` is full text and never bypasses access controls. Give it one lane and one write: `<run>/round-N/lane-K.jsonl`. Each JSON line uses `title`, `authors`, `year`, `venue`, `type`, `doi`, `arxiv`, `url`, `oa_url`, `relevance`, and `lane` when known; format authors as `Last, First and Last, First`. It returns five lines covering new candidates, known work, and gaps.
 
-Run `lit.py dedup`. Decide each candidate in `decisions.jsonl` as `{"id": "...", "accept": true|false, "reason": "..."}` with a project-specific reason. `in_kb` may be a title-only match, so accept such a candidate only when a second package is intended. Reject by default: relevance means the project would cite or use it. Keep intake near 30–40 packages; the answer must not depend on more than readers can read. The lead runs `lit.py ingest`; there is no writer. `LIT_PYMUPDF_TIMEOUT` bounds the `pymupdf` attempt in seconds and defaults to 120; the `pdftotext` fallback has its own 120-second limit.
+Run `lit.py dedup`. Decide each candidate in `decisions.jsonl` as `{"id": "...", "accept": true|false, "reason": "..."}` with a project-specific reason. `in_kb` may be a title-only match, so accept such a candidate only when a second package is intended. Reject by default: relevance means the project would cite or use it. Ingest only what this round's readers will read, about 10–20 packages per reader. Because the lead decides each candidate individually, a batch above roughly 80–100 is a sign to split the round or narrow the lanes. The lead runs `lit.py ingest`; there is no writer. `LIT_PYMUPDF_TIMEOUT` bounds the `pymupdf` attempt in seconds and defaults to 120; the `pdftotext` fallback has its own 120-second limit.
 
 Spawn readers in parallel over disjoint lists of about 10–20 slugs. A reader reads `fulltext.md` and checks `original.*` when needed, edits only its assigned `paper.md` files, and returns one line per slug. It sets `status: read` only when the KB README quality bar is met.
 
@@ -27,7 +27,7 @@ After notes exist, one agent or the lead may edit only `topics/`, `runs/<date>-<
 
 After each round, `lit.py check <kb>` must exit 0. Confirm every accepted ID occurs in the results file, read 3–5 random new notes against `fulltext.md`, and reject the batch if necessary. Report `UNREAD`.
 
-Stop when a round yields nothing the lead would cite. Call this operational saturation under the recorded scope and cutoff, never proof of completeness. There is no minimum or maximum round count.
+Run round two unless round one yielded nothing, because citation chaining from read packages is where most value appears. Stop when a round yields nothing the lead would cite. Call this operational saturation under the recorded scope and cutoff, never proof of completeness. Stop after five rounds unless the user set a different cap for this run, and report `capped` when the cap stops the run.
 
 ## User files
 
