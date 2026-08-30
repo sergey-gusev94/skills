@@ -1,6 +1,0 @@
-# Source files may be large or restricted.
-papers/*/original.*
-# Extracted full text is derived.
-papers/*/fulltext.md
-# User-supplied files may be restricted.
-inbox/

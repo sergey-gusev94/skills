@@ -52,8 +52,9 @@ After first installation, `ln -sfn` makes the block safe to rerun. Verify the gl
 
 - Codex CLI on `PATH` (tested with 0.150.1). The council skills need Codex's stable, default-on `multi_agent` feature; check with `codex features list`.
 - `$lit` uses native subagents. Set `[agents] max_concurrent_threads_per_session` to at least 11 for the lead and ten researchers. Every spawn pins `gpt-5.6-luna`, maximum reasoning effort, and a fresh context.
-- `literature/scripts/lit.py` needs `uv` and `curl`. `pdftotext` is optional for ingest but required by the test suite.
-- Run the literature tests with `uv run --with pymupdf==1.26.4 --with pyyaml==6.0.2 python -B -m unittest discover -s literature/tests`.
+- `literature/scripts/lit.py` needs `uv` and `curl`; it also provides the paced `get` fetch for scholarly APIs. `pdftotext` is optional for ingest but required by the test suite.
+- Run the literature tests with `uv run --with pymupdf4llm==1.28.2 --with pyyaml==6.0.2 python -B -m unittest discover -s literature/tests -v`.
+- The optional Semantic Scholar key is a single line in `~/.config/lit/semantic-scholar.key`; run `chmod 600 ~/.config/lit/semantic-scholar.key`, and only `lit.py get` reads it. `get` works keyless when the file is absent.
 - `hybrid-council` invokes `$council`, and `hybrid-review` invokes `$review-council`, so their Codex skill symlinks must be installed.
 - `hybrid-implement` needs the `hybrid-review` symlink and therefore `review-council`.
 - The general council and implementation runners default to `gpt-5.6-sol`; override per run with `CODEX_COUNCIL_MODEL` or `CODEX_IMPLEMENT_MODEL`. Direct Codex skill invocations use the active model except for `$lit`'s required child pin.

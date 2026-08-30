@@ -1,4 +1,4 @@
-# Run: uv run --with pymupdf==1.26.4 --with pyyaml==6.0.2 python -B -m unittest discover -s literature/tests
+# Run: uv run --with pymupdf4llm==1.28.2 --with pyyaml==6.0.2 python -B -m unittest discover -s literature/tests -v
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -47,6 +49,9 @@ class SourceServer:
                 elif self.path == "/artifact":
                     body = b"artifact data\n" * 100
                     content_type = "application/octet-stream"
+                elif self.path == "/text.txt":
+                    body = b"References [1] Smith 2020.\n" * 50
+                    content_type = "text/plain"
                 elif self.path == "/zero.pdf":
                     body = b""
                     content_type = "application/pdf"
@@ -76,13 +81,29 @@ class SourceServer:
         self.thread.join()
 
 
+class LocalServer:
+    def __init__(self, handler: type[BaseHTTPRequestHandler]):
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def __enter__(self) -> str:
+        self.thread.start()
+        host, port = self.server.server_address
+        return f"http://{host}:{port}"
+
+    def __exit__(self, *_args: object) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+
+
 class LitTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.project = self.root / "project"
         self.project.mkdir()
-        with contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.root)}), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(lit.main(["init", str(self.project)]), 0)
         self.kb = self.project / "literature"
         self.pdf = self.root / "source.pdf"
@@ -155,7 +176,7 @@ class LitTests(unittest.TestCase):
         package = self.packages()[0]
         data = lit.frontmatter(package / "paper.md")
         self.assertEqual(data["access"], "open")
-        self.assertEqual(data["fulltext"], "pymupdf")
+        self.assertEqual(data["fulltext"], "pymupdf4llm")
         self.assertTrue((package / "original.pdf").is_file())
 
     def test_non_web_oa_url_is_rejected_without_copying(self) -> None:
@@ -212,7 +233,9 @@ class LitTests(unittest.TestCase):
             }])
         self.assertEqual(status, 0)
         package = self.packages()[0]
-        self.assertEqual(lit.frontmatter(package / "paper.md")["fulltext"], "pdftotext")
+        data = lit.frontmatter(package / "paper.md")
+        self.assertEqual(data["fulltext"], "pdftotext")
+        self.assertIn("timeout after 0.01s; used pdftotext", data["extraction_note"])
         self.assertEqual(len(lit.PAGE_RE.findall((package / "fulltext.md").read_text(encoding="utf-8"))), 2)
 
     def test_extracted_marker_shaped_text_is_neutralized(self) -> None:
@@ -351,10 +374,94 @@ class LitTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(lit.main(["check", str(self.kb)]), 0)
 
-    def test_check_warns_for_read_note_without_two_page_locators(self) -> None:
+    def test_check_errors_for_read_note_without_two_page_locators(self) -> None:
         status, _ = self.ingest([{
             "id": "R-N001", "title": "Sparse Note", "authors": "Doe, Jane",
             "year": 2024, "file": str(self.pdf),
+        }])
+        self.assertEqual(status, 0)
+        note = self.packages()[0] / "paper.md"
+        data = lit.frontmatter(note)
+        data["status"] = "read"
+        note.write_text(
+            f"---\n{lit.yaml_document(data)}\n---\n\nA sparse read note. [[{note.parent.name}]] p.1\n",
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 1)
+        self.assertIn(
+            f"ERROR: papers/{note.parent.name}/paper.md: status read requires locators on two distinct pages including one after p.1",
+            stdout.getvalue(),
+        )
+
+    def test_one_page_text_package_with_p1_locator_passes_as_read(self) -> None:
+        source = self.root / "source.txt"
+        source.write_text("A concrete result is 42.\n", encoding="utf-8")
+        status, _ = self.ingest([{
+            "id": "R-N001", "title": "Plain Text", "authors": "Doe, Jane",
+            "year": 2024, "file": str(source),
+        }])
+        self.assertEqual(status, 0)
+        package = self.packages()[0]
+        note = package / "paper.md"
+        data = lit.frontmatter(note)
+        self.assertEqual(data["fulltext"], "text")
+        self.assertEqual(lit.PAGE_RE.findall((package / "fulltext.md").read_text(encoding="utf-8")), ["1"])
+        data["status"] = "read"
+        note.write_text(
+            f"---\n{lit.yaml_document(data)}\n---\n\nThe result is 42 [[{package.name}]] p.1.\n",
+            encoding="utf-8",
+        )
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 0)
+        self.assertIn("READ_UNCITED=1", stdout.getvalue())
+        nested_run = self.kb / "runs" / "run-1" / "round-1.md"
+        nested_run.parent.mkdir()
+        nested_run.write_text(f"Uses [[{package.name}]].\n", encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 0)
+        self.assertIn("READ_UNCITED=0", stdout.getvalue())
+
+    def test_markdown_leading_bracket_is_extracted_as_text(self) -> None:
+        source = self.root / "source.md"
+        source.write_text("[![badge](x)](y)\n\nA result.\n", encoding="utf-8")
+        status, _ = self.ingest([{
+            "id": "R-N001", "title": "Markdown", "file": str(source),
+        }])
+        self.assertEqual(status, 0)
+        package = self.packages()[0]
+        self.assertEqual(lit.frontmatter(package / "paper.md")["fulltext"], "text")
+        self.assertTrue((package / "original.md").is_file())
+
+    def test_retrieved_text_does_not_keep_no_extraction_note(self) -> None:
+        with SourceServer(self.pdf.read_bytes()) as server:
+            status, results = self.ingest([{
+                "id": "R-N001", "title": "Retrieved Text", "oa_url": server + "/text.txt",
+            }])
+        self.assertEqual(status, 0)
+        data = lit.frontmatter(self.packages()[0] / "paper.md")
+        self.assertEqual(data["fulltext"], "text")
+        self.assertNotIn("retrieval_note", data)
+        self.assertEqual(results[0]["reason"], "Needed by this project.")
+
+    def test_check_errors_for_read_without_fulltext(self) -> None:
+        status, _ = self.ingest([{"id": "R-N001", "title": "Unavailable"}])
+        self.assertEqual(status, 0)
+        note = self.packages()[0] / "paper.md"
+        data = lit.frontmatter(note)
+        data["status"] = "read"
+        note.write_text(f"---\n{lit.yaml_document(data)}\n---\n\nRead note.\n", encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 1)
+        self.assertIn("status read requires full text", stdout.getvalue())
+
+    def test_check_errors_when_read_note_keeps_unread_placeholder(self) -> None:
+        status, _ = self.ingest([{
+            "id": "R-N001", "title": "Placeholder", "file": str(self.pdf),
         }])
         self.assertEqual(status, 0)
         note = self.packages()[0] / "paper.md"
@@ -364,11 +471,331 @@ class LitTests(unittest.TestCase):
         note.write_text(f"---\n{lit.yaml_document(data)}\n---{body}", encoding="utf-8")
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 1)
+        self.assertIn("still contains the unread placeholder", stdout.getvalue())
+
+    def test_page_ranges_validate_both_endpoints_and_order(self) -> None:
+        status, _ = self.ingest([{
+            "id": "R-N001", "title": "Ranges", "file": str(self.pdf),
+        }])
+        self.assertEqual(status, 0)
+        slug = self.packages()[0].name
+        topic = self.kb / "topics" / "ranges.md"
+        topic.write_text(f"Valid [[{slug}]] p.1-2.\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(lit.main(["check", str(self.kb)]), 0)
-        self.assertIn(
-            f"WARNING: {note.parent.name}: status read with fewer than two locators on distinct pages",
-            stdout.getvalue(),
+        topic.write_text(f"Also valid [[{slug}]] p.1—2**\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 0)
+        topic.write_text(f"Prose [[{slug}]] p.1—the author argues this.\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 0)
+        topic.write_text(f"Reversed [[{slug}]] p.2-1.\n", encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 1)
+        self.assertIn("is not an increasing page range", stdout.getvalue())
+        topic.write_text(f"Outside [[{slug}]] p.1-3.\n", encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 1)
+        self.assertIn("p.1-3 exceeds 2 pages", stdout.getvalue())
+        topic.write_text(f"Malformed [[{slug}]] p.1-2x.\n", encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 1)
+        self.assertIn("has a malformed page range", stdout.getvalue())
+        topic.write_text(f"Malformed [[{slug}]] p.x-2.\n", encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 1)
+        self.assertIn("has a malformed page range", stdout.getvalue())
+
+    def test_ingest_rerun_skips_completed_results(self) -> None:
+        candidates = [{"id": "R-N001", "title": "Idempotent"}]
+        candidate_path = self.write_jsonl("rerun-candidates.jsonl", candidates)
+        decision_path = self.write_jsonl(
+            "rerun-decisions.jsonl",
+            [{"id": "R-N001", "accept": True, "reason": "Needed."}],
         )
+        results = self.root / "rerun-results.jsonl"
+        argv = [
+            "ingest", "--kb", str(self.kb), "--candidates", str(candidate_path),
+            "--decisions", str(decision_path), "--results", str(results),
+        ]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lit.main(argv), 0)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(lit.main(argv), 0)
+        self.assertIn("R-N001 skipped (already in results)", output.getvalue())
+        self.assertEqual(len(self.packages()), 1)
+        self.assertEqual(len(results.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_get_uses_key_retries_and_paces_same_host(self) -> None:
+        calls: list[tuple[float, str | None]] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                calls.append((time.monotonic(), self.headers.get("x-api-key")))
+                if len(calls) == 1:
+                    self.send_response(429)
+                    self.send_header("Retry-After", "0.05")
+                    self.end_headers()
+                    return
+                body = b"ok"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        key = "temporary-test-key"
+        key_file = self.root / "test-s2.key"
+        key_file.write_text(key, encoding="utf-8")
+        url = f"http://127.0.0.1:{server.server_address[1]}/api"
+        stderr = io.StringIO()
+        environment = {
+            "HOME": str(self.root), "LIT_S2_KEY_FILE": str(key_file),
+            "LIT_TEST_S2_HOST": "127.0.0.1", "LIT_TEST_GET_INTERVAL": "0.15",
+        }
+        try:
+            with mock.patch.dict(os.environ, environment, clear=True), contextlib.redirect_stderr(stderr):
+                self.assertEqual(lit.main(["get", url, "--out", str(self.root / "one.json")]), 0)
+                self.assertEqual(lit.main(["get", url, "--out", str(self.root / "two.json")]), 0)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        self.assertEqual([value for _, value in calls], [key, key, key])
+        self.assertTrue(all(right[0] - left[0] >= 0.12 for left, right in zip(calls, calls[1:])))
+        self.assertNotIn(key, stderr.getvalue())
+        self.assertEqual((self.root / "one.json").read_bytes(), b"ok")
+
+    def test_get_confines_key_and_succeeds_keyless(self) -> None:
+        seen_keys: list[str | None] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                seen_keys.append(self.headers.get("x-api-key"))
+                body = b"ok"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                pass
+
+        key_file = self.root / "fake.key"
+        key_file.write_text("temporary-test-key", encoding="utf-8")
+        with LocalServer(Handler) as server:
+            environment = {
+                "HOME": str(self.root), "LIT_TEST_GET_INTERVAL": "0",
+                "LIT_S2_KEY_FILE": str(key_file),
+            }
+            with mock.patch.dict(os.environ, environment, clear=True), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(lit.main(["get", server, "--out", str(self.root / "non-s2")]), 0)
+            environment = {
+                "HOME": str(self.root), "LIT_TEST_GET_INTERVAL": "0",
+                "LIT_TEST_S2_HOST": "127.0.0.1",
+            }
+            with mock.patch.dict(os.environ, environment, clear=True), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(lit.main(["get", server, "--out", str(self.root / "keyless")]), 0)
+            environment = {
+                "HOME": str(self.root), "LIT_TEST_GET_INTERVAL": "0",
+                "LIT_TEST_S2_HOST": "127.0.0.1",
+                "LIT_S2_KEY_FILE": str(self.root / "missing.key"),
+            }
+            with mock.patch.dict(os.environ, environment, clear=True), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(lit.main(["get", server, "--out", str(self.root / "missing-key")]), 0)
+            invalid_key = self.root / "invalid.key"
+            invalid_key.write_bytes(b"\xff")
+            environment["LIT_S2_KEY_FILE"] = str(invalid_key)
+            with mock.patch.dict(os.environ, environment, clear=True), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(lit.main(["get", server, "--out", str(self.root / "invalid-key")]), 0)
+            environment["LIT_S2_KEY_FILE"] = str(self.root / "nul") + "\0"
+            with mock.patch.object(lit.os, "environ", environment), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(lit.main(["get", server, "--out", str(self.root / "nul-key")]), 0)
+        self.assertEqual(seen_keys, [None, None, None, None, None])
+
+    def test_get_terminal_429_publishes_cooldown(self) -> None:
+        calls: list[float] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                calls.append(time.monotonic())
+                if len(calls) <= 4:
+                    self.send_response(429)
+                    self.send_header("Retry-After", "0.05")
+                    self.end_headers()
+                    return
+                body = b"ok"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                pass
+
+        environment = {
+            "HOME": str(self.root), "LIT_TEST_GET_INTERVAL": "0.15",
+        }
+        with LocalServer(Handler) as server, mock.patch.dict(
+            os.environ, environment, clear=True,
+        ), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(lit.main(["get", server, "--out", str(self.root / "exhausted")]), 1)
+            self.assertEqual(lit.main(["get", server, "--out", str(self.root / "after-cooldown")]), 0)
+        self.assertEqual(len(calls), 5)
+        self.assertGreaterEqual(calls[4] - calls[3], 0.04)
+
+    def test_get_does_not_retry_404(self) -> None:
+        requests = 0
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                nonlocal requests
+                requests += 1
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                pass
+
+        stderr = io.StringIO()
+        with LocalServer(Handler) as server, mock.patch.dict(
+            os.environ, {"HOME": str(self.root), "LIT_TEST_GET_INTERVAL": "0"}, clear=True,
+        ), contextlib.redirect_stderr(stderr):
+            self.assertEqual(lit.main(["get", server, "--out", str(self.root / "missing")]), 1)
+        self.assertEqual(requests, 1)
+        self.assertIn("GET 404 0 127.0.0.1", stderr.getvalue())
+
+    def test_get_rejects_truncated_body(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Length", "20")
+                self.end_headers()
+                self.wfile.write(b"short")
+                self.close_connection = True
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                pass
+
+        stderr = io.StringIO()
+        with LocalServer(Handler) as server, mock.patch.dict(
+            os.environ, {"HOME": str(self.root), "LIT_TEST_GET_INTERVAL": "0"}, clear=True,
+        ), contextlib.redirect_stderr(stderr):
+            self.assertEqual(lit.main(["get", server, "--out", str(self.root / "truncated")]), 1)
+        self.assertIn("GET ERROR 0 127.0.0.1", stderr.getvalue())
+        self.assertNotIn("GET 200", stderr.getvalue())
+
+    def test_get_refuses_redirect_without_forwarding_key(self) -> None:
+        target_keys: list[str | None] = []
+
+        class TargetHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                target_keys.append(self.headers.get("x-api-key"))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                pass
+
+        with LocalServer(TargetHandler) as target:
+            class RedirectHandler(BaseHTTPRequestHandler):
+                def do_GET(self) -> None:
+                    self.send_response(302)
+                    self.send_header("Location", target)
+                    self.end_headers()
+
+                def log_message(self, _format: str, *_args: object) -> None:
+                    pass
+
+            key_file = self.root / "redirect.key"
+            key_file.write_text("temporary-test-key", encoding="utf-8")
+            stderr = io.StringIO()
+            with LocalServer(RedirectHandler) as redirect, mock.patch.dict(os.environ, {
+                "HOME": str(self.root), "LIT_TEST_GET_INTERVAL": "0",
+                "LIT_TEST_S2_HOST": "127.0.0.1", "LIT_S2_KEY_FILE": str(key_file),
+            }, clear=True), contextlib.redirect_stderr(stderr):
+                self.assertEqual(lit.main(["get", redirect, "--out", str(self.root / "redirect")]), 1)
+        self.assertEqual(target_keys, [])
+        self.assertIn("GET 302 0 127.0.0.1", stderr.getvalue())
+
+    def test_preview_warning_requires_retrieved_fulltext(self) -> None:
+        status, results = self.ingest([{
+            "id": "R-N001", "title": "Unavailable Book", "type": "book",
+        }])
+        self.assertEqual(status, 0)
+        unavailable_slug = str(results[0]["slug"])
+        status, results = self.ingest([{
+            "id": "R-N002", "title": "Short Book", "type": "book", "file": str(self.pdf),
+        }])
+        self.assertEqual(status, 0)
+        short_slug = str(results[0]["slug"])
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 0)
+        self.assertNotIn(f"WARNING: {unavailable_slug}: possible preview or excerpt", stdout.getvalue())
+        self.assertIn(f"WARNING: {short_slug}: possible preview or excerpt", stdout.getvalue())
+
+    def test_both_pdf_extractors_failing_records_retrieval_note(self) -> None:
+        with mock.patch.dict(os.environ, {
+            "LIT_PYMUPDF_TIMEOUT": "0.01", "LIT_TEST_PYMUPDF_DELAY": "0.2",
+        }), mock.patch.object(lit.shutil, "which", return_value=None):
+            status, _ = self.ingest([{
+                "id": "R-N001", "title": "No Extractor", "file": str(self.pdf),
+            }])
+        self.assertEqual(status, 0)
+        data = lit.frontmatter(self.packages()[0] / "paper.md")
+        self.assertEqual(data["fulltext"], "none")
+        self.assertIn("pymupdf4llm failed", data["retrieval_note"])
+
+    def test_pdf_with_txt_filename_keeps_pdf_handling(self) -> None:
+        disguised = self.root / "source.txt"
+        disguised.write_bytes(self.pdf.read_bytes())
+        status, _ = self.ingest([{
+            "id": "R-N001", "title": "Disguised PDF", "file": str(disguised),
+        }])
+        self.assertEqual(status, 0)
+        package = self.packages()[0]
+        data = lit.frontmatter(package / "paper.md")
+        self.assertEqual(data["fulltext"], "pymupdf4llm")
+        self.assertTrue((package / "original.pdf").is_file())
+
+    def test_init_updates_gitignore_and_outside_git_succeeds(self) -> None:
+        repository = self.root / "repo"
+        repository.mkdir()
+        subprocess.run(["git", "init", "-q", str(repository)], check=True)
+        (repository / ".gitignore").write_bytes(b"\xff\n")
+        with mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.root)}), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lit.main(["init", str(repository)]), 0)
+        self.assertEqual((repository / ".gitignore").read_bytes(), b"\xff\nliterature/\n")
+        self.assertFalse((repository / "literature" / ".gitignore").exists())
+        outside = self.root / "outside"
+        outside.mkdir()
+        with mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.root)}), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lit.main(["init", str(outside)]), 0)
+        self.assertFalse((outside / ".gitignore").exists())
+
+    def test_not_retrieved_index_includes_doi_and_url(self) -> None:
+        status, _ = self.ingest([{
+            "id": "R-N001", "title": "Missing", "doi": "10.1/missing",
+            "url": "https://example.test/landing",
+        }])
+        self.assertEqual(status, 0)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 0)
+        index = (self.kb / "index.md").read_text(encoding="utf-8")
+        self.assertIn("doi:10.1/missing", index)
+        self.assertIn("https://example.test/landing", index)
 
     def test_slug_forms_fallbacks_and_collisions(self) -> None:
         occupied: set[str] = set()

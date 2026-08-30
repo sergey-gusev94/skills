@@ -1,14 +1,17 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pymupdf==1.26.4", "pyyaml==6.0.2"]
+# dependencies = ["pymupdf4llm==1.28.2", "pyyaml==6.0.2"]
 # ///
 """Create, ingest, validate, and index a literature knowledge base."""
 
 from __future__ import annotations
 
 import argparse
+import email.utils
+import fcntl
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -21,7 +24,15 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+try:
+    import pymupdf4llm
+except ImportError:
+    print("lit.py must be executed directly so its uv shebang provides dependencies; never run 'python lit.py'", file=sys.stderr)
+    raise SystemExit(2)
 
 import yaml
 
@@ -45,7 +56,7 @@ TYPES = {
     "report", "dataset", "software", "standard", "other",
 }
 ACCESSES = {"open", "user-supplied", "none"}
-FULLTEXTS = {"pymupdf", "pdftotext", "none"}
+FULLTEXTS = {"pymupdf4llm", "pdftotext", "text", "none"}
 STATUSES = {"unread", "read"}
 REQUIRED_PRESENT = {
     "slug", "title", "authors", "year", "venue", "type", "access",
@@ -56,7 +67,15 @@ REQUIRED_NONEMPTY = {
     "candidate_id", "relevance",
 }
 PAGE_RE = re.compile(r"<!--\s*page\s+(\d+)\s*-->")
-REF_RE = re.compile(r"\[\[([^]\n]+)\]\](?:\s+p\.(\d+))?")
+REF_RE = re.compile(r"\[\[([^]\n]+)\]\](?:\s+p\.(\d+)(?:([-–—])(\d+))?)?")
+RANGE_TOKEN_RE = re.compile(r"\[\[([^]\n]+)\]\]\s+p\.([^\s]*[-–—]\d\S*)")
+GET_INTERVALS = {
+    "api.semanticscholar.org": 1.1,
+    "api.openalex.org": 0.15,
+    "api.crossref.org": 0.15,
+    "export.arxiv.org": 3.0,
+    "www.ebi.ac.uk": 0.15,
+}
 
 
 def text(value: Any) -> str:
@@ -193,11 +212,47 @@ def command_init(args: argparse.Namespace) -> int:
         return 1
     template = Path(__file__).resolve().parent.parent / "assets" / "kb-template"
     shutil.copytree(template, kb, symlinks=True)
-    gitignore = kb / "gitignore"
-    gitignore.rename(kb / ".gitignore")
     generate_derived(kb, {})
+    ensure_git_ignored(kb)
     print(f"INITIALIZED={kb}")
     return 0
+
+
+def ensure_git_ignored(kb: Path) -> None:
+    try:
+        resolved_kb = kb.resolve()
+        root = Path(subprocess.run(
+            ["git", "-C", str(resolved_kb.parent), "rev-parse", "--show-toplevel"],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        ).stdout.strip()).resolve()
+        ignored = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "--quiet", str(resolved_kb)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode == 0
+        if ignored:
+            return
+        entry = resolved_kb.relative_to(root).as_posix().rstrip("/") + "/"
+        ignore_file = root / ".gitignore"
+        try:
+            if ignore_file.is_symlink():
+                raise OSError(f"{ignore_file} is a symlink")
+            existing = ignore_file.read_text(
+                encoding="utf-8", errors="surrogateescape",
+            ) if ignore_file.exists() else ""
+            separator = "" if not existing or existing.endswith("\n") else "\n"
+            with ignore_file.open("a", encoding="utf-8") as handle:
+                handle.write(f"{separator}{entry}\n")
+        except (OSError, UnicodeError, ValueError) as exc:
+            print(f"WARNING: could not update .gitignore: {exc}", file=sys.stderr)
+            return
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        print(f"WARNING: could not update .gitignore: {exc}", file=sys.stderr)
+        return
+    except (subprocess.SubprocessError, ValueError):
+        return
+    print(f"ADDED_GITIGNORE={entry}")
 
 
 def merge_group(records: list[dict[str, Any]], indexes: list[int]) -> dict[str, Any]:
@@ -350,12 +405,14 @@ def source_extension(data: bytes, content_type: str = "", url: str = "") -> str:
         return "xlsx"
     if data.startswith(b"PK\x03\x04") or "zip" in ctype:
         return "zip"
-    if lowered.startswith((b"{", b"[")) or "json" in ctype:
+    if "json" in ctype:
         return "json"
     if "markdown" in ctype or suffix in {".md", ".markdown"}:
         return "md"
     if ctype.startswith("text/") or suffix == ".txt":
         return "txt"
+    if lowered.startswith((b"{", b"[")):
+        return "json"
     return "bin"
 
 
@@ -374,8 +431,8 @@ def sha256(path: Path) -> str:
 
 def write_pages(path: Path, pages: Iterable[str]) -> None:
     page_list = list(pages)
-    if not page_list:
-        raise ValueError("extractor returned no pages")
+    if not page_list or not any(page.strip() for page in page_list):
+        raise ValueError("extractor returned no usable text")
     chunks = []
     for number, page in enumerate(page_list, 1):
         safe_page = PAGE_RE.sub(lambda match: match.group(0).replace("<!--", "<!- -", 1), page)
@@ -387,19 +444,31 @@ def pymupdf_worker(source: Path, output: Path) -> int:
     delay = os.environ.get("LIT_TEST_PYMUPDF_DELAY")
     if delay:
         time.sleep(float(delay))
-    import pymupdf
-
-    document = pymupdf.open(source)
-    try:
-        write_pages(output, [page.get_text() for page in document])
-    finally:
-        document.close()
+    chunks = pymupdf4llm.to_markdown(str(source), page_chunks=True, use_ocr=False)
+    if not isinstance(chunks, list) or not chunks:
+        raise ValueError("pymupdf4llm returned no page chunks")
+    pages = []
+    for chunk in chunks:
+        if not isinstance(chunk, dict) or not isinstance(chunk.get("text"), str):
+            raise ValueError("invalid pymupdf4llm page chunk")
+        pages.append(chunk["text"])
+    write_pages(output, pages)
     return 0
 
 
-def extract_pdf(source: Path, output: Path, timeout: float | None = None) -> str:
+def extraction_failure(exc: BaseException, timeout: float) -> str:
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return f"timeout after {timeout:g}s"
+    if isinstance(exc, subprocess.CalledProcessError):
+        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else text(exc.stderr)
+        tail = stderr.strip().splitlines()[-1] if stderr.strip() else f"exit {exc.returncode}"
+        return f"{type(exc).__name__}: {tail}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def extract_pdf(source: Path, output: Path, timeout: float | None = None) -> tuple[str, str]:
     if timeout is None:
-        timeout = float(os.environ.get("LIT_PYMUPDF_TIMEOUT", "120"))
+        timeout = float(os.environ.get("LIT_PYMUPDF_TIMEOUT", "300"))
     try:
         subprocess.run(
             [sys.executable, str(Path(__file__).resolve()), "_extract-pymupdf", str(source), str(output)],
@@ -408,12 +477,13 @@ def extract_pdf(source: Path, output: Path, timeout: float | None = None) -> str
             stderr=subprocess.PIPE,
             timeout=timeout,
         )
-        return "pymupdf"
-    except (OSError, subprocess.SubprocessError, ValueError):
+        return "pymupdf4llm", ""
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        primary_failure = extraction_failure(exc, timeout)
         output.unlink(missing_ok=True)
     executable = shutil.which("pdftotext")
     if not executable:
-        return "none"
+        return "none", f"pymupdf4llm failed: {primary_failure}; pdftotext not found"
     try:
         result = subprocess.run(
             [executable, str(source), "-"], check=True,
@@ -423,10 +493,11 @@ def extract_pdf(source: Path, output: Path, timeout: float | None = None) -> str
         if pages and not pages[-1].strip():
             pages.pop()
         write_pages(output, pages)
-        return "pdftotext"
-    except (OSError, subprocess.SubprocessError, ValueError):
+        return "pdftotext", f"pymupdf4llm failed: {primary_failure}; used pdftotext"
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
         output.unlink(missing_ok=True)
-        return "none"
+        fallback_failure = extraction_failure(exc, 120)
+        return "none", f"pymupdf4llm failed: {primary_failure}; pdftotext failed: {fallback_failure}"
 
 
 def surname_for(authors: Any, title_value: Any) -> str:
@@ -490,6 +561,7 @@ def yaml_document(data: dict[str, Any]) -> str:
 def paper_note(data: dict[str, Any]) -> str:
     return (
         f"---\n{yaml_document(data)}\n---\n\n"
+        "<!-- unread -->\n\n"
         "This package is unread. A reader must replace this body with source-grounded notes "
         f"and cite claims with `[[{data['slug']}]] p.N` locators.\n\n"
         "## Summary\n\nUnread.\n\n"
@@ -584,7 +656,7 @@ def package_metadata(candidate: dict[str, Any], decision_reason: str, slug: str,
             value = normalize_arxiv(value)
         if value:
             data[key] = value
-    for key in ("source_url", "retrieved", "source_sha256", "retrieval_note"):
+    for key in ("source_url", "retrieved", "source_sha256", "retrieval_note", "extraction_note"):
         if source.get(key):
             data[key] = source[key]
     return data
@@ -650,6 +722,13 @@ def build_package(kb: Path, candidate: dict[str, Any], reason: str, slug: str,
                 prefix, source_info.get("content_type", ""),
                 source_info.get("source_url", file_value),
             )
+            supplied_suffix = Path(file_value).suffix.lower()
+            if (file_value and supplied_suffix in {".txt", ".md", ".markdown"}
+                    and extension in {"txt", "md", "bin"}):
+                extension = "txt" if supplied_suffix == ".txt" else "md"
+            source_suffix = supplied_suffix if file_value else Path(
+                urlparse(source_info.get("source_url", "")).path
+            ).suffix.lower()
             original = stage / f"original.{extension}"
             temp_source.rename(original)
             source_info["source_sha256"] = sha256(original)
@@ -666,9 +745,18 @@ def build_package(kb: Path, candidate: dict[str, Any], reason: str, slug: str,
                     "duplicate_source": duplicate,
                 }
             if extension == "pdf":
-                fulltext_value = extract_pdf(original, stage / "fulltext.md")
+                fulltext_value, extraction_note = extract_pdf(original, stage / "fulltext.md")
+                if fulltext_value == "pdftotext":
+                    source_info["extraction_note"] = extraction_note
                 if fulltext_value == "none":
-                    source_info["retrieval_note"] = "PDF text extraction failed with pymupdf and pdftotext"
+                    source_info["retrieval_note"] = extraction_note
+            elif extension in {"txt", "md"} and source_suffix in {".txt", ".md", ".markdown"}:
+                content = original.read_text(encoding="utf-8", errors="replace")
+                write_pages(stage / "fulltext.md", [content])
+                fulltext_value = "text"
+                generated_note = f"non-PDF body ({source_info.get('content_type') or 'unknown'}); no text extracted"
+                if source_info.get("retrieval_note") == generated_note:
+                    source_info.pop("retrieval_note")
         metadata = package_metadata(candidate, reason, slug, access, fulltext_value, source_info)
         note_content = paper_note(metadata)
         (stage / "paper.md").write_text(note_content, encoding="utf-8")
@@ -719,6 +807,7 @@ def command_ingest(args: argparse.Namespace) -> int:
     try:
         candidates = read_jsonl(args.candidates)
         decisions = read_jsonl(args.decisions)
+        prior_results = read_jsonl(args.results) if args.results.exists() else []
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -765,9 +854,16 @@ def command_ingest(args: argparse.Namespace) -> int:
     occupied = set(papers)
     args.results.parent.mkdir(parents=True, exist_ok=True)
     exit_code = 0
+    completed_ids = {
+        text(record.get("id")) for record in prior_results
+        if text(record.get("id")) and text(record.get("result")) != "error"
+    }
     with args.results.open("a", encoding="utf-8") as output:
         for candidate in candidates:
             candidate_id = text(candidate.get("id"))
+            if candidate_id in completed_ids:
+                print(f"{candidate_id} skipped (already in results)")
+                continue
             decision = by_id[candidate_id][0]
             reason = text(decision.get("reason"))
             if not decision["accept"]:
@@ -887,7 +983,13 @@ def generate_derived(kb: Path, papers: dict[str, dict[str, Any]]) -> None:
         lines.extend([f"## {heading}", ""])
         for slug, data in sorted(papers.items()):
             if predicate(data):
-                lines.append(f"- [[{slug}]] — {text(data.get('title'))} — {text(data.get('authors'))} ({text(data.get('year'))}), {text(data.get('venue'))}.")
+                suffix = ""
+                if heading == "Not retrieved":
+                    details = ([f"doi:{normalize_doi(data.get('doi'))}"] if normalize_doi(data.get("doi")) else [])
+                    if text(data.get("url")):
+                        details.append(text(data.get("url")))
+                    suffix = f" {'; '.join(details)}" if details else ""
+                lines.append(f"- [[{slug}]] — {text(data.get('title'))} — {text(data.get('authors'))} ({text(data.get('year'))}), {text(data.get('venue'))}.{suffix}")
         lines.append("")
     (kb / "index.md").write_text("\n".join(lines), encoding="utf-8")
 
@@ -924,19 +1026,143 @@ def generate_derived(kb: Path, papers: dict[str, dict[str, Any]]) -> None:
     (kb / "references.bib").write_text("\n\n".join(entries) + ("\n" if entries else ""), encoding="utf-8")
 
 
-def check_git_ignore(kb: Path) -> bool:
+def rate_lock(host: str, interval: float, cooldown: float | None = None) -> None:
+    root = Path.home() / ".cache" / "lit" / "rate"
+    root.mkdir(parents=True, exist_ok=True)
+    handle = (root / re.sub(r"[^a-zA-Z0-9.-]", "_", host)).open("a+", encoding="utf-8")
+    deadline = time.monotonic() + 30
+    locked = False
     try:
-        root = subprocess.run(
-            ["git", "-C", str(kb), "rev-parse", "--show-toplevel"],
-            check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        ).stdout.strip()
-        result = subprocess.run(
-            ["git", "-C", root, "check-ignore", "--quiet", str(kb / "index.md")],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        return result.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("rate lock timeout")
+                time.sleep(0.05)
+        handle.seek(0)
+        try:
+            last_request = float(handle.read().strip() or "0")
+        except ValueError:
+            last_request = 0
+        if cooldown is None:
+            elapsed = time.monotonic() - last_request
+            delay = min(max(0.0, interval - elapsed), 30.0)
+            time.sleep(delay)
+            timestamp = time.monotonic()
+        else:
+            timestamp = max(last_request, time.monotonic() + cooldown - interval)
+        handle.seek(0)
+        handle.truncate()
+        handle.write(str(timestamp))
+        handle.flush()
+    finally:
+        if locked:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        handle.close()
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def retry_after_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            parsed = email.utils.parsedate_to_datetime(value)
+            return max(0.0, parsed.timestamp() - time.time())
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
+def command_get(args: argparse.Namespace) -> int:
+    try:
+        parsed = urlparse(args.url)
+    except ValueError:
+        parsed = None
+    if parsed is None or parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        print("GET ERROR 0 invalid-host", file=sys.stderr)
+        return 1
+    host = parsed.hostname.lower()
+    try:
+        interval = float(os.environ.get("LIT_TEST_GET_INTERVAL", GET_INTERVALS.get(host, 1.0)))
+    except ValueError:
+        print(f"GET ERROR 0 {host}", file=sys.stderr)
+        return 1
+    headers = {"User-Agent": "Codex literature tool (mailto:secquoialilly@gmail.com)"}
+    test_semantic_host = os.environ.get("LIT_TEST_S2_HOST", "").lower()
+    test_key_file = os.environ.get("LIT_S2_KEY_FILE", "")
+    use_key = (
+        parsed.scheme == "https" and host == "api.semanticscholar.org"
+    ) or (
+        bool(test_semantic_host and test_key_file) and host == test_semantic_host
+    )
+    if use_key:
+        key_file = Path(test_key_file or Path.home() / ".config" / "lit" / "semantic-scholar.key")
+        try:
+            key = key_file.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError, ValueError):
+            key = ""
+        if key:
+            headers["x-api-key"] = key
+    opener = build_opener(NoRedirect())
+    status: int | str = "ERROR"
+    body = b""
+    for attempt in range(4):
+        try:
+            try:
+                rate_lock(host, max(0.0, interval))
+            except TimeoutError:
+                pass
+            request = Request(args.url, headers=headers)
+            response = opener.open(request, timeout=60)
+            with response:
+                body = response.read()
+                status = response.status
+            break
+        except HTTPError as exc:
+            status = exc.code
+            retry_after = retry_after_seconds(exc.headers.get("Retry-After"))
+            exc.close()
+            if status != 429 and not 500 <= status <= 599:
+                break
+            backoff = min(30.0, retry_after if retry_after is not None else 2 ** attempt)
+            try:
+                rate_lock(host, max(0.0, interval), backoff)
+            except (OSError, TimeoutError):
+                pass
+            if attempt == 3:
+                break
+            time.sleep(backoff)
+        except (OSError, URLError, TimeoutError, http.client.HTTPException, ValueError):
+            status = "ERROR"
+            body = b""
+            break
+    if isinstance(status, int) and 200 <= status <= 299:
+        try:
+            if args.out:
+                args.out.write_bytes(body)
+            else:
+                stream = getattr(sys.stdout, "buffer", sys.stdout)
+                try:
+                    stream.write(body)
+                except TypeError:
+                    stream.write(body.decode("utf-8", errors="replace"))
+                stream.flush()
+        except OSError:
+            print(f"GET ERROR 0 {host}", file=sys.stderr)
+            return 1
+        print(f"GET {status} {len(body)} {host}", file=sys.stderr)
+        return 0
+    print(f"GET {status} 0 {host}", file=sys.stderr)
+    return 1
 
 
 def command_check(args: argparse.Namespace) -> int:
@@ -954,6 +1180,7 @@ def command_check(args: argparse.Namespace) -> int:
         print("WARNING: unread packages: 0")
         print(f"KB_CHECK=errors={len(structure_errors)}")
         print("UNREAD=0")
+        print("READ_UNCITED=0")
         return 1
     allowed_links = {"AGENTS.md": "README.md", "CLAUDE.md": "README.md"}
     for path in sorted(kb.rglob("*")):
@@ -1039,36 +1266,68 @@ def command_check(args: argparse.Namespace) -> int:
                 page_counts[slug] = len(markers)
             else:
                 page_counts[slug] = 0
+            if text(data.get("type")) in {"book", "thesis"} and 0 < page_counts[slug] < 30:
+                warnings.append(
+                    f"{slug}: possible preview or excerpt ({page_counts[slug]} pages for type {text(data.get('type'))})"
+                )
 
     documents: list[Path] = []
     for slug in papers:
         documents.append(kb / "papers" / slug / "paper.md")
+    synthesis_documents: list[Path] = []
     for folder in ("topics", "runs"):
         root = kb / folder
         if not root.is_symlink() and root.is_dir():
-            documents.extend(path for path in root.glob("*.md") if path.is_file() and not path.is_symlink())
+            found = [path for path in root.glob("**/*.md") if path.is_file() and not path.is_symlink()]
+            documents.extend(found)
+            synthesis_documents.extend(found)
+    synthesis_citations: set[str] = set()
     for document in documents:
         relative = document.relative_to(kb)
         body = document.read_text(encoding="utf-8", errors="replace")
+        for match in RANGE_TOKEN_RE.finditer(body):
+            token = match.group(2).rstrip(".,;:)]}`*\"'_~")
+            if not re.fullmatch(r"\d+[-–—]\d+", token):
+                errors.append(f"{relative}: [[{match.group(1)}]] has a malformed page range")
         for match in REF_RE.finditer(body):
-            slug, page = match.groups()
+            slug, start, separator, end = match.groups()
+            if document in synthesis_documents:
+                synthesis_citations.add(slug)
             if slug not in papers:
                 errors.append(f"{relative}: [[{slug}]] does not resolve")
-            elif page and (int(page) < 1 or int(page) > page_counts.get(slug, 0)):
-                errors.append(f"{relative}: [[{slug}]] p.{page} exceeds {page_counts.get(slug, 0)} pages")
+                continue
+            if start and (int(start) < 1 or int(start) > page_counts.get(slug, 0)):
+                errors.append(f"{relative}: [[{slug}]] p.{start} exceeds {page_counts.get(slug, 0)} pages")
+            if separator and end:
+                if int(start) >= int(end):
+                    errors.append(f"{relative}: [[{slug}]] p.{start}{separator}{end} is not an increasing page range")
+                if int(end) < 1 or int(end) > page_counts.get(slug, 0):
+                    errors.append(f"{relative}: [[{slug}]] p.{start}{separator}{end} exceeds {page_counts.get(slug, 0)} pages")
 
     for slug, data in papers.items():
         if text(data.get("status")) != "read":
             continue
-        body = (kb / "papers" / slug / "paper.md").read_text(encoding="utf-8", errors="replace")
+        note_path = kb / "papers" / slug / "paper.md"
+        body = note_body(note_path.read_text(encoding="utf-8", errors="replace"))
+        if text(data.get("fulltext")) == "none":
+            errors.append(f"papers/{slug}/paper.md: status read requires full text")
+        if "<!-- unread -->" in body or re.search(r"(?m)^Unread\.\s*$", body):
+            errors.append(f"papers/{slug}/paper.md: status read still contains the unread placeholder")
         located_pages = {
-            int(page) for target, page in REF_RE.findall(body)
-            if target == slug and page
+            int(start) for target, start, _separator, _end in REF_RE.findall(body)
+            if target == slug and start
         }
-        if len(located_pages) < 2 or not any(page > 1 for page in located_pages):
-            warnings.append(f"{slug}: status read with fewer than two locators on distinct pages")
+        page_count = page_counts.get(slug, 0)
+        if page_count == 1 and not located_pages:
+            errors.append(f"papers/{slug}/paper.md: status read requires a p.1 locator")
+        elif page_count >= 2 and (len(located_pages) < 2 or not any(page > 1 for page in located_pages)):
+            errors.append(f"papers/{slug}/paper.md: status read requires locators on two distinct pages including one after p.1")
 
     unread = sum(text(data.get("status")) == "unread" for data in papers.values())
+    read_uncited = sum(
+        text(data.get("status")) == "read" and slug not in synthesis_citations
+        for slug, data in papers.items()
+    )
     if not errors:
         generate_derived(kb, papers)
     for error in errors:
@@ -1076,13 +1335,12 @@ def command_check(args: argparse.Namespace) -> int:
     print(f"WARNING: unread packages: {unread}")
     for warning in warnings:
         print(f"WARNING: {warning}")
-    if kb.is_dir() and check_git_ignore(kb):
-        print("WARNING: index.md is ignored by git")
     if errors:
         print(f"KB_CHECK=errors={len(errors)}")
     else:
         print("KB_CHECK=ok")
     print(f"UNREAD={unread}")
+    print(f"READ_UNCITED={read_uncited}")
     return 1 if errors else 0
 
 
@@ -1119,6 +1377,13 @@ def parser() -> argparse.ArgumentParser:
     )
     check_parser.add_argument("kb", type=Path, help="knowledge-base directory")
     check_parser.set_defaults(function=command_check)
+    get_parser = commands.add_parser(
+        "get", help="make a paced scholarly HTTP GET",
+        description="Make a paced scholarly HTTP GET.",
+    )
+    get_parser.add_argument("url", help="HTTP or HTTPS URL")
+    get_parser.add_argument("--out", type=Path, help="write the response body to a file")
+    get_parser.set_defaults(function=command_get)
     return result
 
 
