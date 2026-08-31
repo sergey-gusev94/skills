@@ -41,6 +41,8 @@ Before answering, copy `round-*/lane-*.jsonl`, `candidates.jsonl`, `decisions.js
 
 For inbox files or named paths, create candidates with absolute `file` paths. Match an existing `access: none` package by DOI found in the file, otherwise by title; ask the user if ambiguous. Add its `slug` for promotion, then use the same ingest, read, and check path.
 
+When a later round or run finds a lawful open copy of an `access: none` package, promote it with a candidate carrying `slug` and `oa_url`; ingest records it as `access: open`. Replacing a package whose artifact has extracted text also requires `"replace": true`.
+
 ## Answer
 
 Cite `[[slug]] p.N`. State packages added, unread count, topics changed, check result, rounds, stopping reason, and caveats.

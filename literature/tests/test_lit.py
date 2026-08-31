@@ -353,6 +353,153 @@ class LitTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(lit.main(["check", str(self.kb)]), 0)
 
+    def test_oa_url_promotion_downloads_open_copy_and_passes_check(self) -> None:
+        status, results = self.ingest([{
+            "id": "R-N001", "title": "Metadata Only", "authors": "Doe, Jane",
+            "year": 2024, "doi": "10.1/open-copy",
+        }])
+        self.assertEqual(status, 0)
+        slug = str(results[0]["slug"])
+        with SourceServer(self.pdf.read_bytes()) as server:
+            source_url = server + "/open.pdf"
+            status, results = self.ingest([{
+                "id": "R-N002", "slug": slug, "oa_url": source_url,
+                "title": "Open Copy",
+            }])
+        self.assertEqual(status, 0)
+        self.assertEqual(results[0]["result"], "promoted")
+        self.assertEqual(results[0]["slug"], slug)
+        self.assertEqual(results[0]["access"], "open")
+        self.assertEqual(results[0]["source_url"], source_url)
+        expected_hash = hashlib.sha256(self.pdf.read_bytes()).hexdigest()
+        self.assertEqual(results[0]["sha256"], expected_hash)
+        data = lit.frontmatter(self.kb / "papers" / slug / "paper.md")
+        self.assertEqual(data["slug"], slug)
+        self.assertEqual(data["candidate_id"], "R-N002")
+        self.assertEqual(data["title"], "Open Copy")
+        self.assertEqual(data["doi"], "10.1/open-copy")
+        self.assertEqual(data["access"], "open")
+        self.assertNotEqual(data["fulltext"], "none")
+        self.assertEqual(data["source_url"], source_url)
+        self.assertEqual(data["source_sha256"], expected_hash)
+        self.assertTrue(data["retrieved"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 0)
+
+    def test_promotion_replaces_open_artifact_without_replace_flag(self) -> None:
+        with SourceServer(self.pdf.read_bytes()) as server:
+            status, results = self.ingest([{
+                "id": "R-N001", "title": "HTML-only Source",
+                "oa_url": server + "/artifact",
+            }])
+        self.assertEqual(status, 0)
+        slug = str(results[0]["slug"])
+        before = lit.frontmatter(self.kb / "papers" / slug / "paper.md")
+        self.assertEqual(before["access"], "open")
+        self.assertEqual(before["fulltext"], "none")
+
+        source = self.root / "promotion.txt"
+        source.write_text("A concrete result is 42.\n", encoding="utf-8")
+        status, results = self.ingest([{
+            "id": "R-N002", "slug": slug, "file": str(source),
+        }])
+        self.assertEqual(status, 0)
+        self.assertEqual(results[0]["result"], "promoted")
+        data = lit.frontmatter(self.kb / "papers" / slug / "paper.md")
+        self.assertEqual(data["access"], "user-supplied")
+        self.assertEqual(data["fulltext"], "text")
+
+    def test_promotion_of_extracted_text_requires_replace_true(self) -> None:
+        source = self.root / "promotion.txt"
+        source.write_text("A concrete result is 42.\n", encoding="utf-8")
+        status, results = self.ingest([{
+            "id": "R-N001", "title": "Extracted Source", "file": str(source),
+        }])
+        self.assertEqual(status, 0)
+        slug = str(results[0]["slug"])
+        package = self.kb / "papers" / slug
+        before = {path.name: path.read_bytes() for path in package.iterdir()}
+
+        status, results = self.ingest([{
+            "id": "R-N002", "slug": slug, "file": str(source),
+        }])
+        self.assertEqual(status, 1)
+        self.assertEqual(results[0]["result"], "error")
+        self.assertEqual(
+            results[0]["reason"],
+            'promotion target has extracted text; set "replace": true to replace it',
+        )
+        self.assertEqual({path.name: path.read_bytes() for path in package.iterdir()}, before)
+
+        status, results = self.ingest([{
+            "id": "R-N003", "slug": slug, "file": str(source), "replace": "true",
+        }])
+        self.assertEqual(status, 1)
+        self.assertEqual(results[0]["result"], "error")
+        self.assertEqual(
+            results[0]["reason"],
+            'promotion target has extracted text; set "replace": true to replace it',
+        )
+        self.assertEqual({path.name: path.read_bytes() for path in package.iterdir()}, before)
+
+        status, results = self.ingest([{
+            "id": "R-N004", "slug": slug, "file": str(source), "replace": True,
+        }])
+        self.assertEqual(status, 0)
+        self.assertEqual(results[0]["result"], "promoted")
+        self.assertEqual(lit.frontmatter(package / "paper.md")["candidate_id"], "R-N004")
+
+    def test_promotion_file_takes_precedence_over_oa_url(self) -> None:
+        status, results = self.ingest([{"id": "R-N001", "title": "Metadata Only"}])
+        self.assertEqual(status, 0)
+        slug = str(results[0]["slug"])
+        source = self.root / "promotion.txt"
+        source.write_text("A concrete result is 42.\n", encoding="utf-8")
+
+        with mock.patch.object(lit, "fetch", side_effect=AssertionError("fetch should not be called")) as fetch_mock:
+            status, results = self.ingest([{
+                "id": "R-N002", "slug": slug, "file": str(source),
+                "oa_url": "http://127.0.0.1:1/unreachable",
+            }])
+        fetch_mock.assert_not_called()
+        self.assertEqual(status, 0)
+        self.assertEqual(results[0]["result"], "promoted")
+        self.assertEqual(results[0]["access"], "user-supplied")
+        self.assertEqual(results[0]["source_url"], "")
+        data = lit.frontmatter(self.kb / "papers" / slug / "paper.md")
+        self.assertEqual(data["access"], "user-supplied")
+        self.assertNotIn("source_url", data)
+
+    def test_promotion_requires_file_or_oa_url(self) -> None:
+        status, results = self.ingest([{"id": "R-N001", "title": "Metadata Only"}])
+        self.assertEqual(status, 0)
+        slug = str(results[0]["slug"])
+
+        status, results = self.ingest([{"id": "R-N002", "slug": slug}])
+        self.assertEqual(status, 1)
+        self.assertEqual(results[0]["result"], "error")
+        self.assertEqual(results[0]["reason"], "promotion requires a file or oa_url")
+
+    def test_failed_oa_url_promotion_preserves_existing_package(self) -> None:
+        status, results = self.ingest([{"id": "R-N001", "title": "Metadata Only"}])
+        self.assertEqual(status, 0)
+        slug = str(results[0]["slug"])
+        package = self.kb / "papers" / slug
+        note = package / "paper.md"
+        note.write_text(note.read_text(encoding="utf-8") + "\nPrior note.\n", encoding="utf-8")
+        before = {path.name: path.read_bytes() for path in package.iterdir()}
+
+        with SourceServer(self.pdf.read_bytes()) as server:
+            status, results = self.ingest([{
+                "id": "R-N002", "slug": slug, "oa_url": server + "/html",
+            }])
+        self.assertEqual(status, 1)
+        self.assertEqual(results[0]["result"], "error")
+        self.assertEqual(results[0]["slug"], slug)
+        self.assertEqual(results[0]["reason"], "rejected HTML body")
+        self.assertEqual({path.name: path.read_bytes() for path in package.iterdir()}, before)
+        self.assertFalse((self.kb / ".staging").exists())
+
     def test_promotion_identifier_conflict_is_an_item_error(self) -> None:
         status, results = self.ingest([
             {"id": "R-N001", "title": "Target", "doi": "10.1/target"},

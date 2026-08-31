@@ -18,7 +18,7 @@ Each `paper.md` frontmatter has `slug`, `title`, `authors`, `year`, `venue`, `ty
 - `fulltext`: `pymupdf4llm`, `pdftotext`, `text`, or `none`.
 - `status`: `unread` or `read`. Only a reader who read the source may set `read`.
 
-Only `lit.py ingest` creates or replaces paper packages. Promotion replaces the whole package, including any note body written for an `access: none` package. Humans and agents may edit `paper.md` bodies and the `status` and `relation` frontmatter fields, plus files under `topics/` and `runs/`, and `scope.md`.
+Only `lit.py ingest` creates or replaces paper packages. Promotion accepts a user file or an open URL and replaces the whole package, including its note body; a package whose artifact has no extracted text can be re-promoted without a flag as the normal retry for an unusable artifact, while replacing a package that already has extracted text requires the explicit `"replace": true` flag. Humans and agents may edit `paper.md` bodies and the `status` and `relation` frontmatter fields, plus files under `topics/` and `runs/`, and `scope.md`.
 
 ## Evidence and access
 

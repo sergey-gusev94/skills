@@ -713,6 +713,8 @@ def build_package(kb: Path, candidate: dict[str, Any], reason: str, slug: str,
             else:
                 source_info["retrieval_note"] = fetched.get("note", "retrieval failed")
                 temp_source.unlink(missing_ok=True)
+                if promotion:
+                    raise ValueError(source_info["retrieval_note"])
         else:
             source_info["retrieval_note"] = "no open url"
 
@@ -870,8 +872,8 @@ def command_ingest(args: argparse.Namespace) -> int:
                 record = result_record(candidate_id, "rejected", reason)
             else:
                 promotion_slug = text(candidate.get("slug"))
-                if promotion_slug and not text(candidate.get("file")):
-                    record = result_record(candidate_id, "error", "promotion requires a file", promotion_slug)
+                if promotion_slug and not (text(candidate.get("file")) or text(candidate.get("oa_url"))):
+                    record = result_record(candidate_id, "error", "promotion requires a file or oa_url", promotion_slug)
                     exit_code = 1
                     output.write(json.dumps(record, ensure_ascii=False) + "\n")
                     print(f"{candidate_id} error {promotion_slug}: {record['reason']}")
@@ -885,8 +887,12 @@ def command_ingest(args: argparse.Namespace) -> int:
                         output.write(json.dumps(record, ensure_ascii=False) + "\n")
                         print(f"{candidate_id} error {promotion_slug}: {record['reason']}")
                         continue
-                    if text(existing.get("access")) != "none":
-                        record = result_record(candidate_id, "error", "promotion target already has an original", promotion_slug)
+                    if text(existing.get("fulltext")) != "none" and candidate.get("replace") is not True:
+                        record = result_record(
+                            candidate_id, "error",
+                            'promotion target has extracted text; set "replace": true to replace it',
+                            promotion_slug,
+                        )
                         exit_code = 1
                         output.write(json.dumps(record, ensure_ascii=False) + "\n")
                         print(f"{candidate_id} error {promotion_slug}: {record['reason']}")
@@ -898,7 +904,7 @@ def command_ingest(args: argparse.Namespace) -> int:
                         if text(candidate.get(key)):
                             candidate_for_build[key] = candidate[key]
                     for key in ("id", "file", "slug"):
-                        candidate_for_build[key] = candidate[key]
+                        candidate_for_build[key] = candidate.get(key, "")
                     conflict = ""
                     for key, normalizer, owners in (
                         ("doi", normalize_doi, doi_map),
