@@ -36,7 +36,10 @@
 # merge/rebase/cherry-pick in progress, and a clean tree — the current branch,
 # whichever it is, is used as-is. Override the clean-tree check with
 # HYBRID_IMPLEMENT_ALLOW_DIRTY=1, accepting that attribution of changes
-# becomes uncertain.
+# becomes uncertain. Whenever the tree already has staged entries before the
+# run — under HYBRID_IMPLEMENT_ALLOW_DIRTY=1, or on a resume, which performs no
+# cleanliness check — additional staging during the run is not flagged as
+# staged-changes.
 # Run artifacts are kept under ${TMPDIR:-/tmp} so the caller can read them after
 # exit; nothing deletes them automatically — clear old hybrid-implement.*
 # directories if they accumulate.

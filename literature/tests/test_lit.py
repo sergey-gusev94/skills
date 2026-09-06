@@ -621,12 +621,67 @@ class LitTests(unittest.TestCase):
             self.assertEqual(lit.main(["check", str(self.kb)]), 1)
         self.assertIn("still contains the unread placeholder", stdout.getvalue())
 
+    def test_synthesis_page_citations_require_read_package(self) -> None:
+        status, _ = self.ingest([{
+            "id": "R-N001", "title": "Unread Source", "file": str(self.pdf),
+        }])
+        self.assertEqual(status, 0)
+        package = self.packages()[0]
+        self.assertEqual(lit.frontmatter(package / "paper.md")["status"], "unread")
+        for folder in ("topics", "runs/run-1"):
+            document = self.kb / folder / "synthesis.md"
+            document.parent.mkdir(parents=True, exist_ok=True)
+            for locator in ("p.1", "p.1-2"):
+                with self.subTest(folder=folder, locator=locator):
+                    document.write_text(f"Claim [[{package.name}]] {locator}.\n", encoding="utf-8")
+                    stdout = io.StringIO()
+                    with contextlib.redirect_stdout(stdout):
+                        self.assertEqual(lit.main(["check", str(self.kb)]), 1)
+                    self.assertIn(
+                        f"ERROR: {folder}/synthesis.md: [[{package.name}]] page citation requires status read",
+                        stdout.getvalue(),
+                    )
+            document.unlink()
+
+    def test_unread_paper_note_allows_own_page_citations(self) -> None:
+        status, _ = self.ingest([{
+            "id": "R-N001", "title": "Notes In Progress", "file": str(self.pdf),
+        }])
+        self.assertEqual(status, 0)
+        note = self.packages()[0] / "paper.md"
+        self.assertEqual(lit.frontmatter(note)["status"], "unread")
+        note.write_text(
+            note.read_text(encoding="utf-8") + f"\nResult [[{note.parent.name}]] p.1; range [[{note.parent.name}]] p.1-2.\n",
+            encoding="utf-8",
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 0)
+
+    def test_synthesis_allows_bare_reference_to_unread_package(self) -> None:
+        status, _ = self.ingest([{"id": "R-N001", "title": "Bibliographic Inclusion"}])
+        self.assertEqual(status, 0)
+        package = self.packages()[0]
+        self.assertEqual(lit.frontmatter(package / "paper.md")["status"], "unread")
+        for folder in ("topics", "runs/run-1"):
+            document = self.kb / folder / "synthesis.md"
+            document.parent.mkdir(parents=True, exist_ok=True)
+            document.write_text(f"Relevant work: [[{package.name}]].\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(lit.main(["check", str(self.kb)]), 0)
+
     def test_page_ranges_validate_both_endpoints_and_order(self) -> None:
         status, _ = self.ingest([{
             "id": "R-N001", "title": "Ranges", "file": str(self.pdf),
         }])
         self.assertEqual(status, 0)
         slug = self.packages()[0].name
+        note = self.packages()[0] / "paper.md"
+        data = lit.frontmatter(note)
+        data["status"] = "read"
+        note.write_text(
+            f"---\n{lit.yaml_document(data)}\n---\n\nResults [[{slug}]] p.1 and [[{slug}]] p.2.\n",
+            encoding="utf-8",
+        )
         topic = self.kb / "topics" / "ranges.md"
         topic.write_text(f"Valid [[{slug}]] p.1-2.\n", encoding="utf-8")
         with contextlib.redirect_stdout(io.StringIO()):

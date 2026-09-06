@@ -50,9 +50,12 @@ ln -sfn ~/repo/skills/hybrid-council/agents/council-opus.md ~/.claude/agents/cou
 
 After first installation, `ln -sfn` makes the block safe to rerun. Verify the global link with `readlink -f ~/.codex/AGENTS.md`; it should resolve to this repository's `global/AGENTS.md`.
 
+Renaming or removing a skill requires deleting its old symlinks.
+
 ## Requirements
 
-- Codex CLI on `PATH` (tested with 0.150.1). The council skills need Codex's stable, default-on `multi_agent` feature; check with `codex features list`.
+- Codex CLI on `PATH` (tested with 0.153.4). The council skills need Codex's stable, default-on `multi_agent` feature; check with `codex features list`.
+- The hybrid skills require the Claude Code CLI.
 - `$lit` uses native subagents. Set `[agents] max_concurrent_threads_per_session` to at least 11 for the lead and ten researchers. Every spawn pins `gpt-5.6-luna`, maximum reasoning effort, and a fresh context.
 - `literature/scripts/lit.py` needs `uv` and `curl`; it also provides the paced `get` fetch for scholarly APIs. `pdftotext` is optional for ingest but required by the test suite.
 - Run the literature tests with `uv run --with pymupdf4llm==1.28.2 --with pyyaml==6.0.2 python -B -m unittest discover -s literature/tests -v`.
@@ -63,4 +66,5 @@ After first installation, `ln -sfn` makes the block safe to rerun. Verify the gl
 - Read-only and write scopes are enforced by instruction rather than sandboxing. `$lit` children inherit the interactive session's sandbox and tools.
 - `run-codex-council.sh` reports `STATUS=ok|failed` and a self-reported `SUBAGENTS=<n|unknown>` count.
 - `run-codex-implement.sh` is write-enabled and checks the resulting tree against git. It never commits; the lead commits only when the user asks directly or through a user-invoked enclosing skill whose contract commits each gated increment.
+- `hybrid-build` uses [`progress-template.md`](hybrid-build/assets/progress-template.md) for durable progress. Its immutable `scope.md` contains only the frozen scope; `progress.md` records the source path and hash from `sha256sum scope.md`. An iteration without a commit, recorded already-satisfied evidence, or a user-confirmed logged drop blocks immediately. Its `allowed-tools` includes `git add`, `git commit`, `git status`, `git diff`, `git log`, and `git rev-parse` for the authorized commit protocol.
 - Run artifacts accumulate under `${TMPDIR:-/tmp}` as `hybrid-council.*` and `hybrid-implement.*` directories; `hybrid-build` also keeps durable run state under the target repository's `<git-dir>/hybrid-build/` directory. Neither is deleted automatically.

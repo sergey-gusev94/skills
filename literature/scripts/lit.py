@@ -1302,6 +1302,8 @@ def command_check(args: argparse.Namespace) -> int:
             if slug not in papers:
                 errors.append(f"{relative}: [[{slug}]] does not resolve")
                 continue
+            if start and document in synthesis_documents and text(papers[slug].get("status")) != "read":
+                errors.append(f"{relative}: [[{slug}]] page citation requires status read")
             if start and (int(start) < 1 or int(start) > page_counts.get(slug, 0)):
                 errors.append(f"{relative}: [[{slug}]] p.{start} exceeds {page_counts.get(slug, 0)} pages")
             if separator and end:
