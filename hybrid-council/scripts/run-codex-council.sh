@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Launch the Codex ten-agent council non-interactively for the hybrid skills.
+# Launch the Codex five-agent council non-interactively for the hybrid skills.
 # Usage:
 #   run-codex-council.sh [--skill council|review-council] <packet-file> [workdir]
 #                                                                 new council run
 #   run-codex-council.sh resume <session-id> <follow-up-file> [workdir]
 #                                                    follow-up in an existing session
 # --skill picks the Codex skill to invoke: council (default) for general
-# inquiry or review-council for the ten-agent code review. Both report the same
+# inquiry or review-council for the five-agent code review. Both report the same
 # COUNCIL_SUBAGENTS sentinel, so the status contract is identical.
 # Prints STATUS/SUBAGENTS/RESULT_FILE/LOG_FILE/SESSION_ID lines; read RESULT_FILE
 # for the answer.
 # STATUS: ok (usable answer) | failed (no usable answer).
-# SUBAGENTS: 10 (full council) | 0-9 (partial council; 0 means no council ran
+# SUBAGENTS: 5 (full council) | 0-4 (partial council; 0 means no council ran
 # and the answer is a single model's) | unknown (the self-reported count is
 # missing or implausible). Every resume reports unknown because completeness is
-# not re-checked. Even 10 is model-self-reported, not independently verified.
+# not re-checked. Even 5 is model-self-reported, not independently verified.
 # The council is read-only by instruction, not by sandbox: Codex runs with full
 # access so subagents can reach the network, and the prompt forbids changes.
 # Run artifacts are kept under ${TMPDIR:-/tmp} so the caller can read them after
@@ -102,7 +102,7 @@ EOF
 fi
 
 # Shared flags for both the initial run and resume.
-COUNCIL_MODEL=${CODEX_COUNCIL_MODEL:-gpt-5.6-sol}
+COUNCIL_MODEL=${CODEX_COUNCIL_MODEL:-gpt-6-astra}
 COUNCIL_EFFORT=high
 
 CODEX_FLAGS=(
@@ -141,7 +141,7 @@ if [[ $MODE != resume ]]; then
   # String classification only — no arithmetic, so odd values like 08 or huge
   # numbers land on unknown instead of tripping bash octal/overflow rules.
   case ${AGENTS:-} in
-    10|[0-9]) SUBAGENTS=$AGENTS ;;
+    [0-5]) SUBAGENTS=$AGENTS ;;
     *) SUBAGENTS=unknown ;;
   esac
 fi

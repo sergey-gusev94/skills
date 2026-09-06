@@ -4,8 +4,8 @@
 
 Seven related multi-agent skills:
 
-- **`council/`** — Codex skill (`$council`): a ten-subagent inquiry for a question, decision, plan, or investigation, synthesized by the lead.
-- **`review-council/`** — Codex skill (`$review-council`): the ten-subagent code-review variant.
+- **`council/`** — Codex skill (`$council`): a five-subagent inquiry for a question, decision, plan, or investigation, synthesized by the lead.
+- **`review-council/`** — Codex skill (`$review-council`): the five-subagent code-review variant.
 - **`hybrid-council/`** — Claude Code skill (`/q`): combines Fable, Opus, and the Codex `$council`, then synthesizes one answer.
 - **`hybrid-review/`** — Claude Code skill (`/hybrid-review`): the code-review variant of `hybrid-council`.
 - **`hybrid-implement/`** — Claude Code skill (`/imp`): a write-enabled implement, review, and fix loop.
@@ -59,7 +59,7 @@ After first installation, `ln -sfn` makes the block safe to rerun. Verify the gl
 - The optional Semantic Scholar key is a single line in `~/.config/lit/semantic-scholar.key`; run `chmod 600 ~/.config/lit/semantic-scholar.key`, and only `lit.py get` reads it. `get` works keyless when the file is absent.
 - `hybrid-council` invokes `$council`, and `hybrid-review` invokes `$review-council`, so their Codex skill symlinks must be installed.
 - `hybrid-implement` needs the `hybrid-review` symlink and therefore `review-council`; `hybrid-build` needs the `imp` symlink and therefore everything `hybrid-implement` needs.
-- The general council and implementation runners default to `gpt-5.6-sol`; override per run with `CODEX_COUNCIL_MODEL` or `CODEX_IMPLEMENT_MODEL`. Direct Codex skill invocations use the active model except for `$lit`'s required child pin.
+- The general council and implementation runners default to `gpt-6-astra`; override per run with `CODEX_COUNCIL_MODEL` or `CODEX_IMPLEMENT_MODEL`. Direct Codex skill invocations use the active model except for `$lit`'s required child pin.
 - Read-only and write scopes are enforced by instruction rather than sandboxing. `$lit` children inherit the interactive session's sandbox and tools.
 - `run-codex-council.sh` reports `STATUS=ok|failed` and a self-reported `SUBAGENTS=<n|unknown>` count.
 - `run-codex-implement.sh` is write-enabled and checks the resulting tree against git. It never commits; the lead commits only when the user asks directly or through a user-invoked enclosing skill whose contract commits each gated increment.

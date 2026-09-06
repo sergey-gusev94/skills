@@ -1,6 +1,6 @@
 interface:
   display_name: "Review Council"
-  short_description: "Ten-agent review with critical synthesis"
+  short_description: "Five-agent review with critical synthesis"
   default_prompt: "Use $review-council to review the current changes and report only verified findings."
 
 policy:
