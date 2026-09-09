@@ -1,0 +1,7 @@
+interface:
+  display_name: "Topic research"
+  short_description: "Question-driven web research with dated evidence and synthesis"
+  default_prompt: "Use $topic to research this question and maintain the project's topic research knowledge base."
+
+policy:
+  allow_implicit_invocation: false

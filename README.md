@@ -2,7 +2,7 @@
 
 ## Skills
 
-Seven related multi-agent skills:
+Eight related multi-agent skills:
 
 - **`council/`** — Codex skill (`$council`): a five-subagent inquiry for a question, decision, plan, or investigation, synthesized by the lead.
 - **`review-council/`** — Codex skill (`$review-council`): the five-subagent code-review variant.
@@ -11,6 +11,7 @@ Seven related multi-agent skills:
 - **`hybrid-implement/`** — Claude Code skill (`/imp`): a write-enabled implement, review, and fix loop.
 - **`hybrid-build/`** — Claude Code skill (`/build`): pursues a frozen mandate through a living work queue, with autonomous investigation and planning and resumable gated, committed increments.
 - **`literature/`** — Codex skill (`$lit`): a flat literature workflow in which the lead directly coordinates researchers and readers and uses the deterministic `scripts/lit.py` tool for initialization, deduplication, ingest, validation, and generated indexes.
+- **`topic-research/`** — Codex skill (`$topic`): question-driven web research coordinated by a lead and researchers, with a derived scope, dated source evidence, optional subject profiles, synthesis, and deterministic initialization, deduplication, and validation.
 
 `hybrid-review` and `hybrid-implement` reuse `hybrid-council`'s runner through in-repository relative symlinks; `hybrid-build` reuses that runner and `hybrid-implement`'s implement runner the same way, so each runner has one source file.
 
@@ -38,6 +39,7 @@ ln -sfn ~/repo/skills/global/AGENTS.md ~/.codex/AGENTS.md
 ln -sfn ~/repo/skills/council ~/.codex/skills/council
 ln -sfn ~/repo/skills/review-council ~/.codex/skills/review-council
 ln -sfn ~/repo/skills/literature ~/.codex/skills/lit
+ln -sfn ~/repo/skills/topic-research ~/.codex/skills/topic
 
 ln -sfn ~/repo/skills/hybrid-council ~/.claude/skills/q
 ln -sfn ~/repo/skills/hybrid-review ~/.claude/skills/hybrid-review
@@ -59,6 +61,9 @@ Renaming or removing a skill requires deleting its old symlinks.
 - `$lit` uses native subagents. Set `[agents] max_concurrent_threads_per_session` to at least 11 for the lead and ten researchers. Every spawn pins `gpt-5.6-luna`, maximum reasoning effort, and a fresh context.
 - `literature/scripts/lit.py` needs `uv` and `curl`; it also provides the paced `get` fetch for scholarly APIs. `pdftotext` is optional for ingest but required by the test suite.
 - Run the literature tests with `uv run --with pymupdf4llm==1.28.2 --with pyyaml==6.0.2 python -B -m unittest discover -s literature/tests -v`.
+- `$topic` uses native subagents and the native Codex web search tool, which subagents inherit. Web search defaults to live results under a full-access sandbox (the user's configuration); otherwise set `web_search = "live"` or pass `--search`.
+- `topic-research/scripts/research.py` needs `uv`. Its KB is ordinary tracked text and is not git-ignored, unlike `$lit`'s.
+- Run the topic research tests with `uv run --with pyyaml==6.0.2 python -B -m unittest discover -s topic-research/tests -v`.
 - The optional Semantic Scholar key is a single line in `~/.config/lit/semantic-scholar.key`; run `chmod 600 ~/.config/lit/semantic-scholar.key`, and only `lit.py get` reads it. `get` works keyless when the file is absent.
 - `hybrid-council` invokes `$council`, and `hybrid-review` invokes `$review-council`, so their Codex skill symlinks must be installed.
 - `hybrid-implement` needs the `hybrid-review` symlink and therefore `review-council`; `hybrid-build` needs the `imp` symlink and therefore everything `hybrid-implement` needs.
