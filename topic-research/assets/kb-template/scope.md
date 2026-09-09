@@ -11,4 +11,4 @@ Complete every item before searching; write `none` with a reason where an item d
 - Lanes (usually three to six, non-overlapping; one seeks criticism, counterevidence, and recent change):
 - Inclusion and exclusion criteria for sources:
 - Done when: which questions must be supported before stopping, and by what evidence:
-- Caps (default: three rounds or 60 source records added in this run, whichever comes first):
+- Caps (default: five rounds; no source-count cap unless the user's task or budget requires one):
