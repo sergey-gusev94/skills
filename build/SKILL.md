@@ -7,7 +7,9 @@ description: Complete a substantial file-based task through coherent commits, in
 
 Act as the lead. Own task interpretation, work selection, review judgments, and commits. The user's request defines the deliverable and scope. Invoking this skill authorizes local commits within that scope; it does not authorize pushing or publishing.
 
-Once invoked, carry the task through implementation, review, fixes, and commits without waiting for routine user input. Resolve ordinary uncertainties through investigation and your own judgment. Ask only when essential information cannot be established or proceeding requires authority beyond the user's request.
+Before implementation, establish the requested outcome, scope, and constraints. Ask the user only about unresolved questions that materially affect what should be delivered and cannot reasonably be answered from the available context. If the request is already clear, proceed directly.
+
+Once the task is understood, carry it through implementation, review, fixes, and commits autonomously. Own the implementation approach, work decomposition, milestones, validation, and routine tradeoffs. Investigate unexpected problems and adapt within the agreed scope without seeking approval for those decisions.
 
 Keep the user's overall goal and constraints in view throughout the task. Maintain a general approach to completing that goal, choose the next meaningful part to complete, and plan its next coherent commit in detail. Develop and revise the approach as the work reveals more information; leave later implementation details open until they become relevant. Planning is your own reasoning and coordination: do not create workflow planning documents or seek approval for plans, work decomposition, or routine implementation decisions.
 
