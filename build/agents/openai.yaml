@@ -1,0 +1,7 @@
+interface:
+  display_name: "Build"
+  short_description: "Adaptive implementation with Codex and Claude reviews"
+  default_prompt: "Use $build to complete this task through coherent commits, with 10 Codex reviewers and an independent Fable-led Claude review."
+
+policy:
+  allow_implicit_invocation: false

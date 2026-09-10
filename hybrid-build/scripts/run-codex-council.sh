@@ -1,1 +1,0 @@
-../../hybrid-council/scripts/run-codex-council.sh
