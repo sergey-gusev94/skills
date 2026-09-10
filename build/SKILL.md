@@ -39,13 +39,13 @@ Task and completion criteria: [insert actual context].
 Review target: [insert exact changes, baseline, endpoint, and artifact scope].
 
 Review this target and the surrounding context needed to assess it.
-Spawn three new independent general-purpose subagents: one with model fable
-to review the entire target, and two with model opus whose focus areas
+Spawn four new independent general-purpose subagents: one with model fable
+to review the entire target, and three with model opus whose focus areas
 you choose. Explicitly select those models when spawning.
 
 You and all reviewers must remain read-only. Give each reviewer the
 task and review target. Reviewers must not delegate further. Wait for
-all three reviews, then independently verify their findings against
+all four reviews, then independently verify their findings against
 the actual work.
 
 Return issues you judge correct, within scope, and worth fixing, with
