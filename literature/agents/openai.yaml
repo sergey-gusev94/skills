@@ -1,7 +1,7 @@
 interface:
   display_name: "Literature"
-  short_description: "Codex-native literature research and ingest"
-  default_prompt: "Use $lit to research this question and maintain the project's literature knowledge base."
+  short_description: "Discover literature or add identified sources"
+  default_prompt: "Use $lit to discover relevant literature or add the supplied sources to the project's literature knowledge base."
 
 policy:
   allow_implicit_invocation: false

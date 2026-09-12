@@ -10,7 +10,7 @@ Eight related multi-agent skills:
 - **`hybrid-review/`** — Claude Code skill (`/hybrid-review`): the code-review variant of `hybrid-council`.
 - **`hybrid-implement/`** — Claude Code skill (`/imp`): a write-enabled implement, review, and fix loop.
 - **`build/`** — Codex skill (`$build`): completes a file-based task through adaptive work selection, coherent commits, and independent Codex and Claude reviews at increment, milestone, and final scope.
-- **`literature/`** — Codex skill (`$lit`): a flat literature workflow in which the lead directly coordinates researchers and readers and uses the deterministic `scripts/lit.py` tool for initialization, deduplication, ingest, validation, and generated indexes.
+- **`literature/`** — Codex skill (`$lit`): discover literature with researchers and readers, or add identified sources directly in the invoking agent. Both paths use the deterministic `scripts/lit.py` tool for initialization, deduplication, ingest, validation, and generated indexes.
 - **`topic-research/`** — Codex skill (`$topic`): question-driven web research coordinated by a lead and researchers, with a derived scope, dated source evidence, optional subject profiles, synthesis, and deterministic initialization, deduplication, and validation.
 
 `hybrid-review` and `hybrid-implement` reuse `hybrid-council`'s runner through in-repository relative symlinks, so the runner has one source file.
@@ -58,7 +58,7 @@ Renaming or removing a skill requires deleting its old symlinks. When migrating 
 
 - Codex CLI on `PATH` (tested with 0.153.4). The council skills need Codex's stable, default-on `multi_agent` feature; check with `codex features list`.
 - The hybrid skills and `$build` require the Claude Code CLI.
-- `$lit` uses native subagents. Set `[agents] max_concurrent_threads_per_session` to at least 11 for the lead and ten researchers. Every spawn pins `gpt-5.6-luna`, maximum reasoning effort, and a fresh context.
+- `$lit` discovery uses native subagents. Set `[agents] max_concurrent_threads_per_session` to at least 11 for the lead and ten researchers. Every child spawned by `$lit` pins `gpt-5.6-luna`, maximum reasoning effort, and a fresh context. Adding identified sources requires no child agents; the invoking agent handles the supplied batch directly.
 - `literature/scripts/lit.py` needs `uv` and `curl`; it also provides the paced `get` fetch for scholarly APIs. `pdftotext` is optional for ingest but required by the test suite.
 - Run the literature tests with `uv run --with pymupdf4llm==1.28.2 --with pyyaml==6.0.2 python -B -m unittest discover -s literature/tests -v`.
 - `$topic` uses native subagents and the native Codex web search tool, which subagents inherit. Web search defaults to live results under a full-access sandbox (the user's configuration); otherwise set `web_search = "live"` or pass `--search`.
