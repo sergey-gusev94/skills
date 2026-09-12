@@ -11,6 +11,7 @@ import argparse
 import email.utils
 import fcntl
 import hashlib
+from html.parser import HTMLParser
 import http.client
 import json
 import os
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import time
 import unicodedata
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -401,6 +403,9 @@ def source_extension(data: bytes, content_type: str = "", url: str = "") -> str:
         return "pdf"
     if lowered.startswith((b"<!doctype html", b"<html")) or "html" in ctype:
         return "html"
+    media_type = ctype.split(";", 1)[0].strip()
+    if media_type in {"application/xml", "text/xml"} or media_type.endswith("+xml") or suffix == ".xml":
+        return "xml"
     if "spreadsheetml" in ctype or suffix == ".xlsx":
         return "xlsx"
     if data.startswith(b"PK\x03\x04") or "zip" in ctype:
@@ -440,11 +445,108 @@ def write_pages(path: Path, pages: Iterable[str]) -> None:
     path.write_text("\n".join(chunks), encoding="utf-8")
 
 
-def pymupdf_worker(source: Path, output: Path) -> int:
+class FulltextHTMLParser(HTMLParser):
+    """Linearize explicitly selected full text, without executing page content."""
+
+    blocks = {"p", "div", "section", "article", "li", "tr", "pre", "blockquote"}
+    skipped = {"script", "style", "noscript", "svg", "head"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.skip_stack: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self.skipped:
+            self.skip_stack.append(tag)
+        if self.skip_stack:
+            return
+        if re.fullmatch(r"h[1-6]", tag):
+            self.parts.append("\n\n" + "#" * int(tag[1]) + " ")
+        elif tag in self.blocks or tag == "br":
+            self.parts.append("\n")
+        elif tag in {"td", "th"}:
+            self.parts.append(" | ")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.skip_stack:
+            if tag == self.skip_stack[-1]:
+                self.skip_stack.pop()
+            return
+        if tag in self.blocks or re.fullmatch(r"h[1-6]", tag):
+            self.parts.append("\n\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self.skip_stack:
+            self.parts.append(data)
+
+
+def extract_fulltext_document(source: Path, output: Path, format_name: str) -> None:
+    """Opt-in HTML/JATS extraction; the caller must verify it is full text."""
+    content = source.read_text(encoding="utf-8-sig")
+    if format_name == "html":
+        parser = FulltextHTMLParser()
+        parser.feed(content)
+        parser.close()
+        extracted = "".join(parser.parts)
+    elif format_name == "text":
+        if len(content.strip()) < 200:
+            raise ValueError("full-text document contains fewer than 200 text characters")
+        write_pages(output, [content])
+        return
+    elif format_name == "jats":
+        root = ET.fromstring(content)
+        local_name = lambda node: node.tag.rsplit("}", 1)[-1]
+        body = next((node for node in root if local_name(node) == "body"), None)
+        if local_name(root) != "article" or body is None or not "".join(body.itertext()).strip():
+            raise ValueError("JATS source must contain an article with a nonempty body")
+        blocks = {
+            "title", "article-title", "p", "sec", "abstract", "ref", "tr", "list-item",
+            "disp-formula", "caption", "contrib", "aff", "article-id", "journal-id",
+            "journal-title", "abbrev-journal-title", "issn", "publisher-name", "pub-date",
+            "volume", "issue", "fpage", "lpage", "page-range", "permissions", "license",
+        }
+        spaced = {"surname", "given-names", "year", "month", "day", "institution", "kwd"}
+        parts: list[str] = []
+
+        def visit(node: ET.Element) -> None:
+            tag = local_name(node)
+            if tag in blocks:
+                parts.append("\n\n")
+            if node.text:
+                parts.append(node.text)
+            for child in node:
+                visit(child)
+                if child.tail:
+                    parts.append(child.tail)
+            if tag in {"td", "th"}:
+                parts.append(" | ")
+            elif tag in spaced:
+                parts.append(" ")
+            if tag in blocks:
+                parts.append("\n\n")
+
+        visit(root)
+        extracted = "".join(parts)
+    else:
+        raise ValueError("fulltext_format must be html, jats, or text")
+    extracted = "\n".join(re.sub(r"[\t \f\v]+", " ", line).strip() for line in extracted.splitlines())
+    extracted = re.sub(r"\n{3,}", "\n\n", extracted).strip()
+    if len(extracted) < 200:
+        raise ValueError("full-text document contains fewer than 200 text characters")
+    write_pages(output, [extracted])
+
+
+def pymupdf_worker(source: Path, output: Path, *, use_ocr: bool = False) -> int:
     delay = os.environ.get("LIT_TEST_PYMUPDF_DELAY")
     if delay:
         time.sleep(float(delay))
-    chunks = pymupdf4llm.to_markdown(str(source), page_chunks=True, use_ocr=False)
+    ocr_options = {}
+    if use_ocr:
+        from pymupdf4llm.ocr import tesseract_api
+        ocr_options = {"ocr_function": tesseract_api.exec_ocr, "force_ocr": True}
+    chunks = pymupdf4llm.to_markdown(str(source), page_chunks=True,
+                                    use_ocr=use_ocr, **ocr_options)
     if not isinstance(chunks, list) or not chunks:
         raise ValueError("pymupdf4llm returned no page chunks")
     pages = []
@@ -466,18 +568,25 @@ def extraction_failure(exc: BaseException, timeout: float) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def extract_pdf(source: Path, output: Path, timeout: float | None = None) -> tuple[str, str]:
+def extract_pdf(source: Path, output: Path, timeout: float | None = None,
+                *, use_ocr: bool = False) -> tuple[str, str]:
     if timeout is None:
         timeout = float(os.environ.get("LIT_PYMUPDF_TIMEOUT", "300"))
     try:
+        command = [sys.executable, str(Path(__file__).resolve()), "_extract-pymupdf", str(source), str(output)]
+        if use_ocr:
+            command.append("--ocr")
         subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), "_extract-pymupdf", str(source), str(output)],
+            command,
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
         )
-        return "pymupdf4llm", ""
+        return "pymupdf4llm", (
+            "Explicit local Tesseract OCR; verify recognized text, formulas, and tables against the original PDF."
+            if use_ocr else ""
+        )
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         primary_failure = extraction_failure(exc, timeout)
         output.unlink(missing_ok=True)
@@ -569,7 +678,7 @@ def paper_note(data: dict[str, Any]) -> str:
     )
 
 
-def fetch(url: str, destination: Path) -> tuple[bool, dict[str, str]]:
+def fetch(url: str, destination: Path, *, allow_html: bool = False) -> tuple[bool, dict[str, str]]:
     try:
         scheme = urlparse(url).scheme.lower()
     except ValueError:
@@ -613,7 +722,7 @@ def fetch(url: str, destination: Path) -> tuple[bool, dict[str, str]]:
     except ValueError:
         metadata["note"] = "invalid URL"
         return False, metadata
-    if extension == "html":
+    if extension == "html" and not allow_html:
         metadata["note"] = "rejected HTML body"
         return False, metadata
     try:
@@ -685,6 +794,12 @@ def build_package(kb: Path, candidate: dict[str, Any], reason: str, slug: str,
     source_info: dict[str, str] = {}
     access = "none"
     fulltext_value = "none"
+    document_format = text(candidate.get("fulltext_format"))
+    if document_format not in {"", "html", "jats", "text"}:
+        raise ValueError("fulltext_format must be html, jats, or text")
+    use_ocr = candidate.get("ocr", False)
+    if not isinstance(use_ocr, bool):
+        raise ValueError("ocr must be a boolean")
     try:
         if os.path.islink(staging_root):
             raise ValueError("staging directory is a symlink")
@@ -703,7 +818,8 @@ def build_package(kb: Path, candidate: dict[str, Any], reason: str, slug: str,
             access = "user-supplied"
         elif text(candidate.get("oa_url")):
             retrieved = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            ok, fetched = fetch(text(candidate.get("oa_url")), temp_source)
+            ok, fetched = fetch(text(candidate.get("oa_url")), temp_source,
+                                allow_html=document_format == "html")
             source_info.update(fetched)
             source_info["retrieved"] = retrieved
             if ok:
@@ -747,8 +863,8 @@ def build_package(kb: Path, candidate: dict[str, Any], reason: str, slug: str,
                     "duplicate_source": duplicate,
                 }
             if extension == "pdf":
-                fulltext_value, extraction_note = extract_pdf(original, stage / "fulltext.md")
-                if fulltext_value == "pdftotext":
+                fulltext_value, extraction_note = extract_pdf(original, stage / "fulltext.md", use_ocr=use_ocr)
+                if extraction_note and fulltext_value != "none":
                     source_info["extraction_note"] = extraction_note
                 if fulltext_value == "none":
                     source_info["retrieval_note"] = extraction_note
@@ -759,6 +875,20 @@ def build_package(kb: Path, candidate: dict[str, Any], reason: str, slug: str,
                 generated_note = f"non-PDF body ({source_info.get('content_type') or 'unknown'}); no text extracted"
                 if source_info.get("retrieval_note") == generated_note:
                     source_info.pop("retrieval_note")
+            elif document_format:
+                try:
+                    expected_extension = {"html": "html", "jats": "xml", "text": "txt"}[document_format]
+                    if extension != expected_extension:
+                        raise ValueError(f"expected {document_format} full text, received {extension}")
+                    extract_fulltext_document(original, stage / "fulltext.md", document_format)
+                    fulltext_value = "text"
+                    source_info.pop("retrieval_note", None)
+                    source_info["extraction_note"] = (
+                        f"Explicitly selected {document_format} full text, linearized as one logical page; "
+                        "original document remains authoritative for formulas and tables."
+                    )
+                except (ValueError, ET.ParseError, UnicodeError) as exc:
+                    source_info["retrieval_note"] = f"{document_format} extraction failed: {exc}"
         metadata = package_metadata(candidate, reason, slug, access, fulltext_value, source_info)
         note_content = paper_note(metadata)
         (stage / "paper.md").write_text(note_content, encoding="utf-8")
@@ -900,7 +1030,7 @@ def command_ingest(args: argparse.Namespace) -> int:
                     promotion = True
                     slug = promotion_slug
                     candidate_for_build = dict(existing)
-                    for key in ("title", "authors", "year", "venue", "type", "doi", "arxiv", "url", "oa_url", "relation"):
+                    for key in ("title", "authors", "year", "venue", "type", "doi", "arxiv", "url", "oa_url", "relation", "fulltext_format", "ocr"):
                         if text(candidate.get(key)):
                             candidate_for_build[key] = candidate[key]
                     for key in ("id", "file", "slug"):
@@ -1398,9 +1528,9 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     values = sys.argv[1:] if argv is None else argv
     if values and values[0] == "_extract-pymupdf":
-        if len(values) != 3:
+        if len(values) not in {3, 4} or (len(values) == 4 and values[3] != "--ocr"):
             return 2
-        return pymupdf_worker(Path(values[1]), Path(values[2]))
+        return pymupdf_worker(Path(values[1]), Path(values[2]), use_ocr=len(values) == 4)
     args = parser().parse_args(values)
     return args.function(args)
 

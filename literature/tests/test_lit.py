@@ -43,6 +43,22 @@ class SourceServer:
                 elif self.path == "/xhtml":
                     body = b"\xef\xbb\xbf  <?xml version=\"1.0\"?><html><body>landing page</body></html>" + b" " * 1200
                     content_type = "application/xhtml+xml"
+                elif self.path == "/fulltext-html":
+                    body = (b"<!doctype html><html><head><style>hidden-style</style></head>"
+                            b"<body><h1>Verified documentation</h1><script>hidden-script</script>"
+                            + b"<p>Valid lower bounds &amp; feasible upper bounds require care.</p>" * 25
+                            + b"<table><tr><td>Version</td><td>10.0</td></tr></table></body></html>")
+                    content_type = "text/html; charset=utf-8"
+                elif self.path == "/fulltext-jats":
+                    body = (b'<?xml version="1.0"?><article><front><article-title>Verified article</article-title>'
+                            b"<contrib><name><surname>Doe</surname><given-names>Jane</given-names></name></contrib></front>"
+                            b"<body><sec><title>Results</title>"
+                            + b"<p>A concrete result with explicit assumptions and a valid certificate.</p>" * 25
+                            + b"</sec></body><back><ref>Primary reference</ref></back></article>")
+                    content_type = "application/xml"
+                elif self.path == "/metadata-jats":
+                    body = b"<article><front><article-title>Metadata only</article-title></front></article>" + b" " * 1200
+                    content_type = "application/xml"
                 elif self.path == "/mislabelled":
                     body = source.pdf
                     content_type = "text/html"
@@ -52,6 +68,9 @@ class SourceServer:
                 elif self.path == "/text.txt":
                     body = b"References [1] Smith 2020.\n" * 50
                     content_type = "text/plain"
+                elif self.path == "/change.patch":
+                    body = b"diff --git a/Bounds.cpp b/Bounds.cpp\n+    return missing_bound;\n" * 25
+                    content_type = "text/plain; charset=utf-8"
                 elif self.path == "/zero.pdf":
                     body = b""
                     content_type = "application/pdf"
@@ -98,6 +117,10 @@ class LocalServer:
 
 
 class LitTests(unittest.TestCase):
+    def test_xml_detection_preserves_office_archive_type(self) -> None:
+        self.assertEqual(lit.source_extension(b"<article/>", "application/xml; charset=utf-8"), "xml")
+        self.assertEqual(lit.source_extension(b"PK\x03\x04", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), "xlsx")
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -140,6 +163,49 @@ class LitTests(unittest.TestCase):
     def packages(self) -> list[Path]:
         return sorted(path for path in (self.kb / "papers").iterdir() if path.is_dir())
 
+    def test_explicit_text_extracts_patch_url(self) -> None:
+        with SourceServer(self.pdf.read_bytes()) as server:
+            status, results = self.ingest([{
+                "id": "R-N001", "title": "Bound correction", "authors": "Doe, Jane",
+                "year": 2026, "oa_url": server + "/change.patch", "fulltext_format": "text",
+            }])
+        self.assertEqual(status, 0)
+        package = self.packages()[0]
+        original = (package / "original.txt").read_text()
+        self.assertIn("+    return missing_bound;", original)
+        self.assertIn("+    return missing_bound;", (package / "fulltext.md").read_text())
+        self.assertEqual(results[0]["fulltext"], "text")
+        self.assertEqual(lit.frontmatter(package / "paper.md")["status"], "unread")
+
+    @unittest.skipUnless(pymupdf.get_tessdata(), "local Tesseract data unavailable")
+    def test_scanned_pdf_ocr_promotion_preserves_original(self) -> None:
+        text_doc = pymupdf.open()
+        page = text_doc.new_page()
+        page.insert_textbox(pymupdf.Rect(50, 50, 550, 750),
+                            "Bounds require feasibility and a certificate.\n" * 20, fontsize=14)
+        raster = page.get_pixmap(matrix=pymupdf.Matrix(2, 2)).tobytes("png")
+        scan = pymupdf.open()
+        scan.new_page().insert_image(page.rect, stream=raster)
+        scan_bytes = scan.tobytes()
+        scan.close()
+        text_doc.close()
+        with SourceServer(scan_bytes) as server:
+            candidate = {"id": "R-N001", "title": "Scanned foundation", "authors": "Doe, Jane",
+                         "year": 1991, "oa_url": server + "/scan.pdf"}
+            status, results = self.ingest([candidate])
+            self.assertEqual(status, 0)
+            self.assertEqual(results[0]["fulltext"], "none")
+            candidate.update(id="R-N002", slug=results[0]["slug"], ocr=True)
+            status, results = self.ingest([candidate])
+        self.assertEqual(status, 0)
+        self.assertEqual(results[0]["result"], "promoted")
+        package = self.packages()[0]
+        self.assertEqual((package / "original.pdf").read_bytes(), scan_bytes)
+        self.assertIn("certificate", (package / "fulltext.md").read_text().lower())
+        metadata = lit.frontmatter(package / "paper.md")
+        self.assertEqual(metadata["status"], "unread")
+        self.assertIn("Tesseract OCR", metadata["extraction_note"])
+
     def assert_failed_retrieval(self, path: str, note_fragment: str) -> None:
         with SourceServer(self.pdf.read_bytes()) as server:
             status, results = self.ingest([{
@@ -166,6 +232,67 @@ class LitTests(unittest.TestCase):
 
     def test_xhtml_with_xml_prolog_is_rejected(self) -> None:
         self.assert_failed_retrieval("/xhtml", "rejected HTML body")
+
+    def test_explicit_fulltext_html_promotes_and_preserves_original(self) -> None:
+        with SourceServer(self.pdf.read_bytes()) as server:
+            candidate = {"id": "R-N001", "title": "Verified documentation", "type": "software",
+                         "oa_url": server + "/fulltext-html"}
+            status, _ = self.ingest([candidate])
+            self.assertEqual(status, 0)
+            package = self.packages()[0]
+            self.assertEqual(lit.frontmatter(package / "paper.md")["access"], "none")
+            status, _ = self.ingest([{**candidate, "id": "R-N002", "slug": package.name,
+                                      "fulltext_format": "html"}])
+        self.assertEqual(status, 0)
+        data = lit.frontmatter(package / "paper.md")
+        self.assertEqual((data["access"], data["fulltext"], data["status"]), ("open", "text", "unread"))
+        original = (package / "original.html").read_text()
+        extracted = (package / "fulltext.md").read_text()
+        self.assertIn("hidden-script", original)
+        self.assertNotIn("hidden-script", extracted)
+        self.assertNotIn("hidden-style", extracted)
+        self.assertIn("# Verified documentation", extracted)
+        self.assertIn("bounds & feasible", extracted)
+        self.assertIn("Version | 10.0", extracted)
+        self.assertNotIn("retrieval_note", data)
+        self.assertIn("one logical page", data["extraction_note"])
+
+    def test_explicit_html_does_not_accept_html_masquerading_as_pdf(self) -> None:
+        with SourceServer(self.pdf.read_bytes()) as server:
+            status, _ = self.ingest([{"id": "R-N001", "title": "PDF required",
+                                      "oa_url": server + "/fake.pdf", "fulltext_format": "html"}])
+        self.assertEqual(status, 0)
+        data = lit.frontmatter(self.packages()[0] / "paper.md")
+        self.assertEqual(data["access"], "none")
+        self.assertIn("non-PDF body where PDF was expected", data["retrieval_note"])
+
+    def test_explicit_jats_extracts_article_body_and_preserves_xml(self) -> None:
+        with SourceServer(self.pdf.read_bytes()) as server:
+            status, _ = self.ingest([{"id": "R-N001", "title": "Verified article",
+                                      "oa_url": server + "/fulltext-jats", "fulltext_format": "jats"}])
+        self.assertEqual(status, 0)
+        package = self.packages()[0]
+        data = lit.frontmatter(package / "paper.md")
+        self.assertEqual((data["access"], data["fulltext"], data["status"]), ("open", "text", "unread"))
+        self.assertTrue((package / "original.xml").is_file())
+        extracted = (package / "fulltext.md").read_text()
+        self.assertIn("<!-- page 1 -->", extracted)
+        self.assertIn("A concrete result", extracted)
+        self.assertIn("Doe Jane", extracted)
+        self.assertIn("Primary reference", extracted)
+        self.assertNotIn("retrieval_note", data)
+
+    def test_jats_metadata_without_body_stays_unread_without_fulltext(self) -> None:
+        with SourceServer(self.pdf.read_bytes()) as server:
+            status, _ = self.ingest([{"id": "R-N001", "title": "Metadata only",
+                                      "oa_url": server + "/metadata-jats", "fulltext_format": "jats"}])
+        self.assertEqual(status, 0)
+        package = self.packages()[0]
+        data = lit.frontmatter(package / "paper.md")
+        self.assertEqual((data["fulltext"], data["status"]), ("none", "unread"))
+        self.assertIn("nonempty body", data["retrieval_note"])
+        self.assertTrue((package / "original.xml").is_file())
+        self.assertFalse((package / "fulltext.md").exists())
 
     def test_pdf_magic_beats_html_content_type(self) -> None:
         with SourceServer(self.pdf.read_bytes()) as server:
