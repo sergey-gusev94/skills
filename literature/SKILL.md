@@ -11,7 +11,7 @@ Never run two `$lit` sessions on one repository. During ongoing research, route 
 
 Invoke `<skill>/scripts/lit.py check <kb>` by absolute path. Execute `lit.py` directly so its `uv` shebang runs; never use `python lit.py`. Keep run files in a unique system-temp directory outside the project. The KB is `<project>/literature/`; create it with `lit.py init <project>` when absent. Init enforces that the KB stays git-ignored; never track it or remove that ignore entry.
 
-For every child spawned by this skill, set `model: gpt-5.6-luna`, `reasoning_effort: max`, and `fork_turns: "none"`. This does not select the invoking agent's model or require a separate coordinator. A child has no parent context, so every spawn message must repeat the direct-execution rule, name `<kb>/README.md` by absolute path, and name every other input by absolute path. `wait_agent` caps one wait at one hour; loop waits and never kill a slow agent.
+For every child spawned by this skill, set `model: gpt-6-luna`, `reasoning_effort: max`, and `fork_turns: "none"`. This does not select the invoking agent's model or require a separate coordinator. A child has no parent context, so every spawn message must repeat the direct-execution rule, name `<kb>/README.md` by absolute path, and name every other input by absolute path. `wait_agent` caps one wait at one hour; loop waits and never kill a slow agent.
 
 Make every scholarly API request to OpenAlex, Crossref, arXiv, Europe PMC, or Semantic Scholar through `lit.py get '<url>'`, never raw `curl` to those hosts. `get` paces requests, retries politely, and supplies the Semantic Scholar key itself when configured. Agents never read the key file or place keys in URLs, files, or reports.
 
