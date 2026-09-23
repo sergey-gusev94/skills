@@ -29,7 +29,7 @@ Before declaring completion, review the whole task's result and verify all reque
 
 Keep the target unchanged until all reviews finish. Supply the task, intended outcomes, exact review boundary, and relevant context. For increments, include staged, unstaged, and relevant untracked changes. For milestone and final reviews, identify the starting baseline and current endpoint and inspect the completed artifacts as well as their cumulative changes.
 
-For every full review round, spawn 10 new Codex review subagents with fresh contexts, orchestrating them and assigning focus areas as you see fit. Give at least one reviewer the entire target. Supply the task, current target, and necessary context without prior reviewer conclusions; keep review history with the lead for adjudication. Require independent, read-only reviews with concrete findings, evidence, and impact; reviewers must not delegate further.
+For every full review round, spawn 5 new Codex review subagents with fresh contexts, orchestrating them and assigning focus areas as you see fit. Give at least one reviewer the entire target. Supply the task, current target, and necessary context without prior reviewer conclusions; keep review history with the lead for adjudication. Require independent, read-only reviews with concrete findings, evidence, and impact; reviewers must not delegate further.
 
 Also start a fresh Claude session in the project directory for every full review round. Supply the current task and target without prior reviewer conclusions. Substitute the actual context and target into this template before execution:
 
