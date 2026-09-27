@@ -34,7 +34,7 @@ For every full review round, spawn 5 new Codex review subagents with fresh conte
 Also start a fresh Claude session in the project directory for every full review round. Supply the current task and target without prior reviewer conclusions. Substitute the actual context and target into this template before execution:
 
 ```sh
-claude --model fable --effort high -p <<'REVIEW'
+CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude --model fable --effort high -p <<'REVIEW'
 Task and completion criteria: [insert actual context].
 Review target: [insert exact changes, baseline, endpoint, and artifact scope].
 
