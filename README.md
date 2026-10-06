@@ -2,7 +2,7 @@
 
 ## Skills
 
-Eight related multi-agent skills:
+Nine related multi-agent skills:
 
 - **`council/`** — Codex skill (`$council`): a five-subagent inquiry for a question, decision, plan, or investigation, synthesized by the lead.
 - **`review-council/`** — Codex skill (`$review-council`): the five-subagent code-review variant.
@@ -10,6 +10,7 @@ Eight related multi-agent skills:
 - **`hybrid-review/`** — Claude Code skill (`/hybrid-review`): the code-review variant of `hybrid-council`.
 - **`hybrid-implement/`** — Claude Code skill (`/imp`): a write-enabled implement, review, and fix loop.
 - **`build/`** — Codex skill (`$build`): completes a file-based task through adaptive work selection, coherent commits, and independent Codex and Claude reviews at increment, milestone, and final scope.
+- **`t3-build/`** — Claude Code skill (`/t3-build`) for T3 Code: the lead commits Opus-implemented increments, each reviewed in parallel by an Opus workflow, a Sol-led Codex review, and two Astra reviewers.
 - **`literature/`** — Codex skill (`$lit`): discover literature with researchers and readers, or add identified sources directly in the invoking agent. Both paths use the deterministic `scripts/lit.py` tool for initialization, deduplication, ingest, validation, and generated indexes.
 - **`topic-research/`** — Codex skill (`$topic`): question-driven web research coordinated by a lead and researchers, with a derived scope, dated source evidence, optional subject profiles, synthesis, and deterministic initialization, deduplication, and validation.
 
@@ -45,6 +46,7 @@ ln -sfn ~/repo/skills/topic-research ~/.codex/skills/topic
 ln -sfn ~/repo/skills/hybrid-council ~/.claude/skills/q
 ln -sfn ~/repo/skills/hybrid-review ~/.claude/skills/hybrid-review
 ln -sfn ~/repo/skills/hybrid-implement ~/.claude/skills/imp
+ln -sfn ~/repo/skills/t3-build ~/.claude/skills/t3-build
 
 ln -sfn ~/repo/skills/hybrid-council/agents/council-fable.md ~/.claude/agents/council-fable.md
 ln -sfn ~/repo/skills/hybrid-council/agents/council-opus.md ~/.claude/agents/council-opus.md
@@ -72,4 +74,5 @@ Renaming or removing a skill requires deleting its old symlinks. When migrating 
 - `run-codex-council.sh` reports `STATUS=ok|failed` and a self-reported `SUBAGENTS=<n|unknown>` count.
 - `run-codex-implement.sh` is write-enabled and checks the resulting tree against git. It never commits; the lead commits only when the user asks directly or through a user-invoked enclosing skill whose contract commits each gated increment.
 - `$build` is instruction-only and explicitly invoked. Codex delegates one implementation increment at a time, uses five native Codex reviewers, and runs `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude --model fable --effort high -p` for an independent review with one Fable and three Opus subagents. The variable removes print mode's default 600-second wait for background subagents, which otherwise terminates slow reviewers. The same review process applies to increments, completed milestones, and the final task result. It requires no hybrid skill runners or council agent definitions.
+- `/t3-build` is instruction-only, explicitly invoked, and runs only inside a T3 Code thread. It needs the `t3-code` MCP tools (`delegate_task`) for the Codex reviews (`gpt-6.1-sol` and two `gpt-6-astra`, high reasoning) and the Claude Code Workflow tool for the Opus review. The implementer is a native Opus subagent. Model IDs are named once in the skill's Roles section.
 - Run artifacts accumulate under `${TMPDIR:-/tmp}` as `hybrid-council.*` and `hybrid-implement.*` directories. They are not deleted automatically.
