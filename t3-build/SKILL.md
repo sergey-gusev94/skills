@@ -35,7 +35,7 @@ Treat each substantial part of the task as a milestone. When one is complete, re
 
 ## Review process
 
-Supply every reviewer with the task, intended outcomes, exact review boundary, and relevant context. For increments, include staged, unstaged, and relevant untracked changes. For milestone and final reviews, identify the starting baseline and current endpoint, and include the completed artifacts as well as their cumulative changes. Do not pass on other reviewers' conclusions. You may list previously rejected findings with their reasons so reviewers raise them again only with new evidence.
+Supply every reviewer with the task, intended outcomes, exact review boundary, and relevant context. For increments, include staged, unstaged, and relevant untracked changes. For milestone and final reviews, identify the starting baseline and current endpoint, and include the completed artifacts as well as their cumulative changes. Do not pass on other reviewers' conclusions. In later rounds of the same target, list the significant findings you rejected and why, so reviewers raise them again only with new evidence.
 
 All reviewers must stay read-only and return concrete findings with precise locations, evidence, and impact, or state that they found none. Record `git status` and the diff before starting, and keep the target unchanged until every review finishes. If the tree changed during review, stop and report it to the user.
 
@@ -47,7 +47,7 @@ For every full review round, start these three reviews in parallel:
 
 Completion of the workflow and the delegated tasks notifies you; inspect the target yourself while waiting. Wait for all reviews before adjudicating. Rerun a failed review once; if it fails again, continue but report the missing review as incomplete verification.
 
-Judge every finding yourself against the actual work and task. Combine duplicates and decide whether each finding is correct, within scope, and worth fixing. Agreement is not evidence. After the first round of a target, accept only clear defects and regressions, not re-litigated decisions or scope growth; note worthwhile improvement ideas for the final report. Retain brief reasons for material rejections.
+Judge every finding yourself against the actual work and task. Combine duplicates and decide whether each finding is correct, within scope, and worth fixing. Agreement is not evidence. After the first round of a target, accept only clear defects and regressions, not re-litigated decisions or scope growth; note worthwhile improvement ideas for the final report.
 
 Send all accepted findings to the implementer as one fix batch and have it run appropriate validation. Repeat the full review round after fixes, unless every accepted finding was minor and its fix is straightforward, localized, and confidently verifiable by your own inspection and checks. If that verification reveals a broader problem or leaves material uncertainty, run the full review round.
 
