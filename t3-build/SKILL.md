@@ -1,6 +1,6 @@
 ---
 name: t3-build
-description: Complete a substantial file-based task in T3 Code through Opus-implemented commits, each reviewed by an Opus workflow, a Sol-led Codex review, and two Astra reviewers.
+description: Complete a substantial file-based task in T3 Code through Opus-implemented commits, each reviewed by an Opus workflow and Sol- and Astra-led Codex reviews.
 disable-model-invocation: true
 ---
 
@@ -14,8 +14,7 @@ This skill requires a T3 Code thread with the `t3-code` orchestration tools and 
 
 - **Implementer:** one native subagent with model `opus`. It is the only writer and never commits.
 - **Opus review:** a Workflow whose agents all use model `opus`.
-- **Sol review:** one `delegate_task` with provider `codex`, model `gpt-6.1-sol`, and `reasoningEffort` `high`.
-- **Astra review:** two `delegate_task` calls with provider `codex`, model `gpt-6-astra`, and `reasoningEffort` `high`.
+- **Codex reviews:** one `delegate_task` each with provider `codex` and `reasoningEffort` `high`: Sol uses model `gpt-6.1-sol`, Astra uses `gpt-6-astra`.
 
 ## Approach
 
@@ -42,8 +41,7 @@ All reviewers must stay read-only and return concrete findings with precise loca
 For every full review round, start these three reviews in parallel:
 
 1. **Opus workflow.** Write a review Workflow suited to this target. Choose its review dimensions and number of agents in proportion to the change's size and risk, give at least one agent the entire target, and have findings verified before the workflow returns them. Set `model: 'opus'` on every agent. You may rerun an earlier review workflow's `scriptPath` with new `args` when it fits.
-2. **Sol.** Delegate with `mode: async`, `role: review`, and a new `clientRequestId` for each round. Tell Sol to plan its own review and start as many fresh, independent subagents as the target warrants, then verify their findings against the actual work and return only those it judges correct and worth fixing.
-3. **Astra.** Delegate two independent reviews of the entire target with the same settings as Sol.
+2. **Sol and Astra.** Delegate one review to each with `mode: async`, `role: review`, and a new `clientRequestId` per reviewer for each round. Tell each to plan its own review, start fresh, independent subagents on its own model, with their number proportional to the target's size and risk, give at least one of them the entire target, then verify their findings against the actual work and return only those it judges correct and worth fixing.
 
 Completion of the workflow and the delegated tasks notifies you; inspect the target yourself while waiting. Wait for all reviews before adjudicating. Rerun a failed review once; if it fails again, continue but report the missing review as incomplete verification.
 
