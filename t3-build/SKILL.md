@@ -1,20 +1,21 @@
 ---
 name: t3-build
-description: Complete a substantial file-based task in T3 Code through Opus-implemented commits, each reviewed by an Opus workflow and Sol- and Astra-led Codex reviews.
+description: Complete a substantial file-based task in T3 Code through Opus-implemented commits, each reviewed by an Opus workflow and Sol- and Astra-led Codex reviews, with independent parts built in parallel worktrees.
 disable-model-invocation: true
 ---
 
 # T3 Build
 
-Act as the lead. Own task interpretation, work selection, review judgments, and commits. The user's request defines the deliverable and scope. Invoking this skill authorizes local commits within that scope and the review workflows below; it does not authorize pushing or publishing.
+Act as the lead. Own task interpretation, work selection, review judgments, and commits. The user's request defines the deliverable and scope. Invoking this skill authorizes local commits and merges within that scope, and the review workflows and part leads below; it does not authorize pushing or publishing.
 
 This skill requires a T3 Code thread with the `t3-code` orchestration tools and the Workflow tool. If either is unavailable, tell the user and stop.
 
 ## Roles
 
-- **Implementer:** one native subagent with model `opus`. It is the only writer and never commits.
-- **Opus review:** a Workflow whose agents all use model `opus`.
+- **Implementer:** one native subagent with model `opus`. It is the only writer in its checkout and never commits. Use model `fable` instead for an increment you judge unusually hard, or after an `opus` implementer has failed at the same increment or fix batch.
+- **Opus review:** a Workflow whose agents use model `opus`. In milestone and final reviews, and for increments you judge risky, the agent given the entire target uses model `fable` instead.
 - **Codex reviews:** one `delegate_task` each with provider `codex` and `reasoningEffort` `high`: Sol uses model `gpt-6.1-sol`, Astra uses `gpt-6-astra`.
+- **Part lead:** one `delegate_task` with provider `claudeAgent`, model `claude-fable-5-2`, `effort` `high`, `role: implementation`, and `isolation: worktree`. It builds one parallel part as described under Parallel parts.
 
 ## Approach
 
@@ -25,12 +26,20 @@ Once the task is understood, carry it through implementation, review, fixes, and
 ## Work loop
 
 1. Choose the next coherent increment. Make it small enough to review as one commit and substantial enough to justify a full review round. Determine its intended outcome, implementation approach, and validation.
-2. Have the implementer build it and run that validation. Give it the necessary context and boundaries. Continue the same implementer with `SendMessage` while its context stays useful; start a fresh one when its context grows large or the work shifts substantially. Keep only one writer active at a time.
+2. Have the implementer build it and run that validation. Give it the necessary context and boundaries. Continue the same implementer with `SendMessage` while its context stays useful; start a fresh one when its context grows large or the work shifts substantially. Keep only one writer active in a checkout at a time.
 3. Run the review process below on the resulting changes.
 4. After accepted findings are resolved and required validation passes, commit the reviewed task changes, preserving unrelated work. Create no empty commits.
-5. Reassess progress. Choose the next increment, review a completed milestone, or begin final review.
+5. Reassess progress. Choose the next increment, start parallel parts, review a completed milestone, or begin final review.
 
 Treat each substantial part of the task as a milestone. When one is complete, review its cumulative result and interactions before starting the next. Before declaring completion, review the whole task's result and verify all requested outcomes, including omissions. Milestone and final reviews use the same review process, stay bounded by the user's task, and their fixes are committed before proceeding.
+
+## Parallel parts
+
+When the task contains substantial parts that are clearly independent, build them in parallel, one part lead per part, with no fixed limit on their number. Parts are independent when each has its own outcome and validation, none needs another's result, and none changes files, interfaces, or helpers that another changes or relies on. Count shared files such as lockfiles, configuration, generated files, registries, migrations, and test fixtures. When in doubt, or when a merge conflict is plausible, build those parts sequentially. Keep work too small to justify a lead and a fresh checkout for yourself, or group it into one part.
+
+Start the part leads together with `mode: async`, from a commit that contains everything they need: each worktree starts at your current commit, on its own branch, without uncommitted changes or ignored files such as installed dependencies. Give each part lead the user's task, its part's intended outcome and boundaries, the other parts being built alongside it, and the path of this `SKILL.md`. Tell it to read that file and follow it as the lead with its part as its whole task, that the user's invocation of this skill authorizes its commits and review workflows in its worktree, and that it must not start part leads, merge other branches, or push. It finishes with its part reviewed and committed on its branch, and reports the branch, commits, validation, and limitations. Answer a part lead's questions yourself when the available context settles them.
+
+As parts finish, merge their branches into yours one at a time and run the combined validation after each merge. A conflict, or a failure that appears only after merging, shows the parts were not independent; resolve it as an increment of your own through the work loop. If a part lead stops with its part incomplete, finish that part yourself, starting from its branch. Remove each merged part's worktree and branch. Your final review of the merged result is the only review of interactions between parts.
 
 ## Review process
 
@@ -40,7 +49,7 @@ All reviewers must stay read-only and return concrete findings with precise loca
 
 For every full review round, start these three reviews in parallel:
 
-1. **Opus workflow.** Write a review Workflow suited to this target. Choose its review dimensions and number of agents in proportion to the change's size and risk, give at least one agent the entire target, and have findings verified before the workflow returns them. Set `model: 'opus'` on every agent. You may rerun an earlier review workflow's `scriptPath` with new `args` when it fits.
+1. **Opus workflow.** Write a review Workflow suited to this target. Choose its review dimensions and number of agents in proportion to the change's size and risk, give at least one agent the entire target, and have findings verified before the workflow returns them. Set every agent's `model` as Roles specifies. You may rerun an earlier review workflow's `scriptPath` with new `args` when it fits.
 2. **Sol and Astra.** Delegate one review to each with `mode: async`, `role: review`, and a new `clientRequestId` per reviewer for each round. Tell each to plan its own review, start fresh, independent subagents on its own model, with their number proportional to the target's size and risk, give at least one of them the entire target, then verify their findings against the actual work and return only those it judges correct and worth fixing.
 
 Completion of the workflow and the delegated tasks notifies you; inspect the target yourself while waiting. Wait for all reviews before adjudicating. Rerun a failed review once; if it fails again, continue but report the missing review as incomplete verification.
@@ -49,4 +58,4 @@ Judge every finding yourself against the actual work and task. Combine duplicate
 
 Send all accepted findings to the implementer as one fix batch and have it run appropriate validation. Repeat the full review round after fixes, unless every accepted finding was minor and its fix is straightforward, localized, and confidently verifiable by your own inspection and checks. If that verification reveals a broader problem or leaves material uncertainty, run the full review round.
 
-Finish a review only when no accepted finding remains unresolved and required validation passes. Investigate and resolve recoverable failures autonomously. Report missing reviews, unavailable checks, or stalled progress honestly; incomplete verification is not a passed review. If an essential blocker prevents completion, report what remains and why; do not present partial work as complete. Finish with the completed outcome, commits made, relevant validation, deferred improvement ideas, and any unresolved limitations.
+Finish a review only when no accepted finding remains unresolved and required validation passes. Investigate and resolve recoverable failures autonomously. Report missing reviews, unavailable checks, or stalled progress honestly; incomplete verification is not a passed review. If an essential blocker prevents completion, report what remains and why; do not present partial work as complete. Finish with the completed outcome, commits made, relevant validation, the number of accepted findings each review (Opus workflow, Sol, Astra) raised, deferred improvement ideas, and any unresolved limitations.
