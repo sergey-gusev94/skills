@@ -1,0 +1,6 @@
+interface:
+  display_name: "Paper Writing"
+  short_description: "Standards for writing and editing scientific papers"
+
+policy:
+  allow_implicit_invocation: true
