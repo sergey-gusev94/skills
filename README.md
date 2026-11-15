@@ -16,7 +16,7 @@ Nine related multi-agent skills:
 
 One writing skill, loaded by the agent itself:
 
-- **`paper-writing/`** — skill for Claude Code and Codex with no command: the agent loads it from its description whenever it writes, edits, or reviews a scientific paper. `SKILL.md` covers the argument, agent-specific write-up mistakes, citations, and prose; `references/` holds the revision-pass pattern catalog and the conventions for mathematics and computational experiments. It is not in the install block below yet.
+- **`paper-writing/`** — skill for Claude Code and Codex with no command: the agent loads it from its description whenever it writes, edits, or reviews a scientific paper. `SKILL.md` covers the argument, agent-specific write-up mistakes, citations, and prose; `references/` holds the rules and revision patterns for prose and the conventions for mathematics and computational experiments. It is not in the install block below yet.
 
 `hybrid-review` and `hybrid-implement` reuse `hybrid-council`'s runner through in-repository relative symlinks, so the runner has one source file.
 

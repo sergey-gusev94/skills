@@ -133,20 +133,9 @@ The central contribution appears in the title, the abstract, the introduction, a
 
 ## Sentences and paragraphs
 
-A reader should understand each sentence on the first reading.
+A reader should understand each sentence on the first reading. Use common words and the established terms of the field, and use the same term for the same thing in the whole paper. Give each paragraph one point and most sentences one main idea. Write full sentences, and keep the words that connect ideas, such as "because" and "although". Use literal statements, and start with the content. Do not use em dashes. Format the text as a paper, with paragraphs, numbered sections, equations, figures, and tables.
 
-- Give each paragraph one point, and state the point early, normally in the first sentence. A reader who reads only the first sentence of each paragraph should still be able to follow the argument.
-- Use common words and the established terms of the field. Use the same term for the same thing in the whole paper, because a reader assumes that a different word means a different thing.
-- In most sentences, put the information that the reader already has at the start and the new information at the end. Keep the subject close to its verb. Express an action with a verb. For example, write "we analyze", and do not write "we perform an analysis of".
-- Give most sentences one main idea. Write full sentences, and keep the words that connect ideas, such as "because", "so", "although", and "that". Without these words the text is shorter, but the reader has to work out how the ideas are related.
-- Rewrite a string of nouns when the relations between the nouns are unclear. Established terms such as "support vector machine" stay as they are. Do not use abbreviations that the reader has to look up.
-- Use literal statements. Write "without the constraint, the relaxation is unbounded". Do not write a figure of speech such as "the constraint does the heavy lifting".
-- Start with the content. Do not announce that a point is coming, and do not say that a point is important. Do not ask a rhetorical question and then answer it. Do not end a sentence with a clause that only says that the result is significant, such as ", highlighting the importance of scalable methods". A research question and a short outline of a long argument are useful and can stay.
-- Do not define a thing by denying a claim that nobody made, as in "not X but Y" or "rather than merely X". State Y. Use a contrast only when the reader may believe X or when the paper compares against X.
-- Do not repeat the point of a paragraph in its last sentence. When you list items, list the items that exist, and do not add or remove items to reach three.
-- Use the active voice with "we" if the venue allows it. Use the passive voice when it does not matter who performed the action.
-- Do not use em dashes (`---` in LaTeX). Use a comma, parentheses, a new sentence, or a word such as "because" that states the relation. En dashes in number ranges and in paired names (`--`) are correct.
-- Format the text as a paper, with paragraphs, numbered sections, equations, figures, and tables. Use a list only for parallel items, such as contributions or the steps of an algorithm. Do not start list items with bold phrases, do not present an argument as bullets, and do not leave Markdown syntax in LaTeX.
+Read `references/prose.md` before you draft or edit prose. It gives these rules in full, with examples.
 
 ## Revise in passes
 
@@ -155,11 +144,11 @@ Revise for one kind of problem at a time, in this order.
 1. Argument. Read only the title, the abstract, the first sentence of each paragraph, and the captions. Check that they give the argument and that the paper contains the evidence for every claim in the abstract and the introduction.
 2. Evidence. Compare each number with its source, and compare each citation that you added with the work that it cites. Check that the text cites every figure and table. If the manuscript can be compiled, compile it and correct undefined references and citations.
 3. Reader. Read the paper as a person who knows the field and knows nothing about the project. Look for terms that are used before they are defined, names from the working session, missing steps, repeated explanations, and statements about what the paper does not do. If a reader without context is available, ask that reader what the paper claims and what is new, and compare the answers with your own.
-4. Prose. Read `references/prose-patterns.md` and edit the text against it once. To correct a pattern, rewrite the sentence so that it states its point. A synonym for the marked word does not correct the pattern. Do not lose evidence, numbers, citations, or necessary conditions when you edit for style.
+4. Prose. Read the list of patterns in `references/prose.md` and edit the text against it once. To correct a pattern, rewrite the sentence so that it states its point. A synonym for the marked word does not correct the pattern. Do not lose evidence, numbers, citations, or necessary conditions when you edit for style.
 
 When you finish, tell the user what you could not verify, what you assumed, and what information is still missing. Before a submission, check the venue's current policy on the disclosure of AI assistance, and tell the user what it requires.
 
 ## Reference files
 
-- `references/prose-patterns.md` lists the habits of machine-written prose and how to correct them. Read it for the prose pass and when you review a draft.
+- `references/prose.md` gives the rules for sentences and paragraphs, and lists the habits of machine-written prose and how to correct them. Read it before you draft or edit prose, for the prose pass, and when you review a draft.
 - `references/math-and-experiments.md` gives conventions for mathematical writing and for reports of computational experiments. Read it when the paper has theorems, proofs, algorithms, or computational results.
