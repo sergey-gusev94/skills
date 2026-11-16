@@ -1,0 +1,6 @@
+interface:
+  display_name: "T3 Council"
+  short_description: "Opus, Fable, Sol, and Astra advisers with a Fable synthesis"
+
+policy:
+  allow_implicit_invocation: true
