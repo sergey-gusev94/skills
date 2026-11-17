@@ -102,7 +102,7 @@ EOF
 fi
 
 # Shared flags for both the initial run and resume.
-COUNCIL_MODEL=${CODEX_COUNCIL_MODEL:-gpt-6-astra}
+COUNCIL_MODEL=${CODEX_COUNCIL_MODEL:-gpt-6.2-astra}
 COUNCIL_EFFORT=high
 
 CODEX_FLAGS=(

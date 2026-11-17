@@ -18,8 +18,8 @@ Start every role with `delegate_task`, `mode: async`, and a new `clientRequestId
 | --- | --- | --- | --- |
 | Opus adviser | `claudeAgent` | `claude-opus-5-5` | `effort: high` |
 | Fable adviser | `claudeAgent` | `claude-fable-5-2` | `effort: high` |
-| Sol adviser | `codex` | `gpt-6.1-sol` | `reasoningEffort: high` |
-| Astra adviser | `codex` | `gpt-6-astra` | `reasoningEffort: high` |
+| Sol adviser | `codex` | `gpt-6.2-sol` | `reasoningEffort: high` |
+| Astra adviser | `codex` | `gpt-6.2-astra` | `reasoningEffort: high` |
 | Synthesizer | `claudeAgent` | `claude-fable-5-2` | `effort: high` |
 
 The council is read-only. Tell every adviser and the synthesizer not to change files, system state, or external services.

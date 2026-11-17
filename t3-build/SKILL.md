@@ -14,7 +14,7 @@ This skill requires a T3 Code thread with the `t3-code` orchestration tools and 
 
 - **Implementer:** one native subagent, always with model `opus`. It is the only writer in its checkout and never commits. When it fails at an increment or fix batch, diagnose the failure yourself and give it, or a fresh implementer, a sharper brief.
 - **Opus review:** a Workflow whose agents use model `opus`. In milestone and final reviews, the agent given the entire target uses model `fable` instead. Apart from part leads, this is the only agent you start on `fable`.
-- **Codex reviews:** one `delegate_task` each with provider `codex` and `reasoningEffort` `high`: Sol uses model `gpt-6.1-sol`, Astra uses `gpt-6-astra`.
+- **Codex reviews:** one `delegate_task` each with provider `codex` and `reasoningEffort` `high`: Sol uses model `gpt-6.2-sol`, Astra uses `gpt-6.2-astra`.
 - **Part lead:** one `delegate_task` with provider `claudeAgent`, model `claude-fable-5-2`, `effort` `high`, `role: implementation`, and `isolation: worktree`. It builds one parallel part as described under Parallel parts.
 
 Set the model explicitly on every subagent and workflow agent you start, because one started without a model inherits yours. Any agent that Roles does not cover uses `opus`.

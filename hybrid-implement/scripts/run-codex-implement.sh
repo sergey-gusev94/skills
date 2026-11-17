@@ -144,7 +144,7 @@ EOF
 CODEX_FLAGS=(
   -c sandbox_mode=danger-full-access
   -c tools.web_search=true
-  -m "${CODEX_IMPLEMENT_MODEL:-gpt-6-astra}"
+  -m "${CODEX_IMPLEMENT_MODEL:-gpt-6.2-astra}"
   -c model_reasoning_effort=high
   -o "$RESULT_FILE"
 )
