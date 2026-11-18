@@ -17,7 +17,7 @@ Nine related multi-agent skills:
 Skills for Claude Code and Codex with no command, loaded by the agent itself from their descriptions:
 
 - **`t3-council/`** — used whenever the user asks to use the council. In a T3 Code thread, Opus, Fable, Sol, and Astra advisers work on the same request independently; a Fable synthesizer treats their answers as evidence and returns one result to the invoking agent, which stays responsible for the task. It needs the `t3-code` MCP tools (`delegate_task`); model IDs are named once in the skill's Roles table. It is separate from the explicit `$council` and `/q` skills.
-- **`paper-writing/`** — the agent loads it from its description whenever it writes, edits, or reviews a scientific paper. `SKILL.md` covers the argument, agent-specific write-up mistakes, citations, and prose; `references/` holds the rules and revision patterns for prose and the conventions for mathematics and computational experiments. It is not in the install block below yet.
+- **`paper-writing/`** — the agent loads it from its description whenever it writes, edits, or reviews a scientific paper. `SKILL.md` covers the argument, agent-specific write-up mistakes, citations, and prose; `references/` holds the rules and revision patterns for prose and the conventions for mathematics and computational experiments.
 
 `hybrid-review` and `hybrid-implement` reuse `hybrid-council`'s runner through in-repository relative symlinks, so the runner has one source file.
 
@@ -48,12 +48,14 @@ ln -sfn ~/repo/skills/build ~/.codex/skills/build
 ln -sfn ~/repo/skills/literature ~/.codex/skills/lit
 ln -sfn ~/repo/skills/topic-research ~/.codex/skills/topic
 ln -sfn ~/repo/skills/t3-council ~/.codex/skills/t3-council
+ln -sfn ~/repo/skills/paper-writing ~/.codex/skills/paper-writing
 
 ln -sfn ~/repo/skills/hybrid-council ~/.claude/skills/q
 ln -sfn ~/repo/skills/hybrid-review ~/.claude/skills/hybrid-review
 ln -sfn ~/repo/skills/hybrid-implement ~/.claude/skills/imp
 ln -sfn ~/repo/skills/t3-build ~/.claude/skills/t3-build
 ln -sfn ~/repo/skills/t3-council ~/.claude/skills/t3-council
+ln -sfn ~/repo/skills/paper-writing ~/.claude/skills/paper-writing
 
 ln -sfn ~/repo/skills/hybrid-council/agents/council-fable.md ~/.claude/agents/council-fable.md
 ln -sfn ~/repo/skills/hybrid-council/agents/council-opus.md ~/.claude/agents/council-opus.md
