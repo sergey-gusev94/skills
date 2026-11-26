@@ -12,12 +12,12 @@ This skill requires a T3 Code thread with the `t3-code` orchestration tools and 
 
 ## Roles
 
-- **Implementer:** one native subagent, always with model `opus`. It is the only writer in its checkout and never commits. When it fails at an increment or fix batch, diagnose the failure yourself and give it, or a fresh implementer, a sharper brief.
-- **Opus review:** a Workflow whose agents use model `opus`. In milestone and final reviews, the agent given the entire target uses model `fable` instead. Apart from part leads, this is the only agent you start on `fable`.
+- **Implementer:** one native subagent, always with model `opus` and `effort` `high`. It is the only writer in its checkout and never commits. When it fails at an increment or fix batch, diagnose the failure yourself and give it, or a fresh implementer, a sharper brief.
+- **Opus review:** a Workflow whose agents use model `opus` and `effort` `high`. In milestone and final reviews, the agent given the entire target uses model `fable` instead. Apart from part leads, this is the only agent you start on `fable`.
 - **Codex reviews:** one `delegate_task` each with provider `codex` and `reasoningEffort` `high`: Sol uses model `gpt-6.2-sol`, Astra uses `gpt-6.2-astra`.
 - **Part lead:** one `delegate_task` with provider `claudeAgent`, model `claude-fable-5-2`, `effort` `high`, `role: implementation`, and `isolation: worktree`. It builds one parallel part as described under Parallel parts.
 
-Set the model explicitly on every subagent and workflow agent you start, because one started without a model inherits yours. Any agent that Roles does not cover uses `opus`.
+Every agent you start uses high reasoning effort. Set the model and effort explicitly on every subagent and workflow agent you start: one started without a model inherits yours, and one started without an effort may run below high. Any agent that Roles does not cover uses `opus` with `effort` `high`.
 
 ## Approach
 
@@ -51,8 +51,8 @@ All reviewers must stay read-only and return concrete findings with precise loca
 
 For every full review round, start these three reviews in parallel:
 
-1. **Opus workflow.** Write a review Workflow suited to this target. Choose its review dimensions and number of agents in proportion to the change's size and risk, give at least one agent the entire target, and have findings verified before the workflow returns them. Set every agent's `model` as Roles specifies. You may rerun an earlier review workflow's `scriptPath` with new `args` when it fits.
-2. **Sol and Astra.** Delegate one review to each with `mode: async`, `role: review`, and a new `clientRequestId` per reviewer for each round. Tell each to plan its own review, start fresh, independent subagents on its own model, with their number proportional to the target's size and risk, give at least one of them the entire target, then verify their findings against the actual work and return only those it judges correct and worth fixing.
+1. **Opus workflow.** Write a review Workflow suited to this target. Choose its review dimensions and number of agents in proportion to the change's size and risk, give at least one agent the entire target, and have findings verified before the workflow returns them. Set every agent's `model` and `effort` as Roles specifies. You may rerun an earlier review workflow's `scriptPath` with new `args` when it fits.
+2. **Sol and Astra.** Delegate one review to each with `mode: async`, `role: review`, and a new `clientRequestId` per reviewer for each round. Tell each to plan its own review, start fresh, independent subagents on its own model at high reasoning effort, with their number proportional to the target's size and risk, give at least one of them the entire target, then verify their findings against the actual work and return only those it judges correct and worth fixing.
 
 Completion of the workflow and the delegated tasks notifies you; inspect the target yourself while waiting. Wait for all reviews before adjudicating. Rerun a failed review once; if it fails again, continue but report the missing review as incomplete verification.
 
